@@ -14,7 +14,7 @@ from installer.manifest import MANIFEST, Manifest
 
 Platform = Literal['claude', 'copilot']
 
-_SHARED_BODIES = Path(__file__).resolve().parent.parent / 'shared' / 'agents'
+_DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _marker(name: str) -> str:
@@ -24,8 +24,9 @@ def _marker(name: str) -> str:
     )
 
 
-def _body(name: str, platform: Platform, manifest: Manifest) -> str:
-    text = (_SHARED_BODIES / f'{name}.md').read_text(encoding='utf-8').rstrip('\n')
+def _body(name: str, platform: Platform, manifest: Manifest, root: Path) -> str:
+    source = root / 'shared' / 'agents' / f'{name}.md'
+    text = source.read_text(encoding='utf-8').rstrip('\n')
     for token, replacements in manifest.substitutions.items():
         text = text.replace(token, replacements[platform])
     return text
@@ -35,14 +36,19 @@ def render_worker(
     name: str,
     platform: Platform,
     manifest: Manifest = MANIFEST,
+    root: Path | None = None,
 ) -> str:
-    """Return the full generated file content for one worker on one platform."""
+    """Return the full generated file content for one worker on one platform.
+
+    Bodies come from `root/shared/agents/`; `root` defaults to the repository
+    that contains this module.
+    """
     frontmatter = (
         manifest.claude_frontmatter
         if platform == 'claude'
         else manifest.copilot_frontmatter
     )[name]
-    body = _body(name, platform, manifest)
+    body = _body(name, platform, manifest, root or _DEFAULT_ROOT)
     return f'---\n{frontmatter}---\n\n{_marker(name)}\n\n{body}\n'
 
 
@@ -60,6 +66,8 @@ def sync_workers(root: Path, manifest: Manifest = MANIFEST) -> list[Path]:
         for platform in ('claude', 'copilot'):
             path = generated_path(name, platform, root)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(render_worker(name, platform, manifest), encoding='utf-8')
+            path.write_text(
+                render_worker(name, platform, manifest, root), encoding='utf-8'
+            )
             written.append(path)
     return written
