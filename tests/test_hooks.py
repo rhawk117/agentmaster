@@ -191,3 +191,43 @@ def test_copilot_post_empty_queue(tmp_path):
     assert result.returncode == 0
     line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
     assert line == 'hook,agent,,,\n'
+
+
+_TELEMETRY_REPORT = (
+    Path(__file__).resolve().parent.parent / 'scripts' / 'telemetry_report.py'
+)
+
+
+def _run_report(cwd, *args):
+    return subprocess.run(  # noqa: S603
+        [sys.executable, str(_TELEMETRY_REPORT), *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_telemetry_report_summarizes_per_agent(tmp_path):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'telemetry.md').write_text(
+        'hook,scout,,120,3000\n'
+        'hook,scout,,80,1000\n'
+        'hook,implementer,,,\n'
+        'not a telemetry line\n'
+    )
+
+    result = _run_report(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert 'scout' in result.stdout
+    assert '200' in result.stdout
+    assert 'implementer' in result.stdout
+
+
+def test_telemetry_report_missing_file_exits_one(tmp_path):
+    result = _run_report(tmp_path)
+
+    assert result.returncode == 1
+    assert 'telemetry' in result.stderr.lower()
