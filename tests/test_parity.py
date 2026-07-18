@@ -55,12 +55,6 @@ def test_claude_frontmatter_stable_facts():
     assert rendered.startswith(f'---\n{scout_fm}---\n')
 
 
-def test_implementer_hook_uses_python_guard():
-    fm = MANIFEST.claude_frontmatter['implementer']
-    assert 'python3 "$HOME/.claude/agentmaster/hooks/git_guard.py"' in fm
-    assert 'git-guard.sh' not in fm
-
-
 def test_scout_and_analyst_carry_plan_mode_caveat():
     phrase = (
         'if workspace writes are blocked, as in plan mode, '

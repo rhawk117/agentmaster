@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from installer.actions import InstallReport
 
 _MODEL_SKILLS = frozenset({'agentmaster-plan', 'agentmaster-review'})
-_GIT_GUARD_SOURCE = 'python3 "$HOME/.claude/agentmaster/hooks/git_guard.py"'
+_COST_BOUNDARY_SOURCE = 'python3 "$HOME/.claude/agentmaster/hooks/cost_boundary.py"'
 _ROSTER = '^(scout|code-analyst|plan-critic|implementer|Explore)$'
 
 
@@ -65,13 +65,17 @@ def _pin_model(content: str, model: str) -> str:
 def _skill_plans(
     root: Path, home: Path, model: str, manifest: Manifest
 ) -> list[FilePlan]:
+    interpreter = _interpreter()
+    boundary = f'"{interpreter}" "{home.as_posix()}/agentmaster/hooks/cost_boundary.py"'
     plans: list[FilePlan] = []
     for skill in manifest.claude_skills:
         src_dir = root / 'skills' / skill
         for src in sorted(p for p in src_dir.rglob('*') if p.is_file()):
             content = src.read_text(encoding='utf-8')
-            if src.name == 'SKILL.md' and skill in _MODEL_SKILLS:
-                content = _pin_model(content, model)
+            if src.name == 'SKILL.md':
+                content = content.replace(_COST_BOUNDARY_SOURCE, boundary)
+                if skill in _MODEL_SKILLS:
+                    content = _pin_model(content, model)
             relative = src.relative_to(src_dir)
             plans.append(
                 FilePlan(content=content, destination=home / 'skills' / skill / relative)
@@ -80,12 +84,9 @@ def _skill_plans(
 
 
 def _agent_plans(root: Path, home: Path, manifest: Manifest) -> list[FilePlan]:
-    interpreter = _interpreter()
-    rewritten = f'"{interpreter}" "{home.as_posix()}/agentmaster/hooks/git_guard.py"'
     plans: list[FilePlan] = []
     for worker in manifest.workers:
         text = render_worker(worker, 'claude', manifest, root)
-        text = text.replace(_GIT_GUARD_SOURCE, rewritten)
         plans.append(FilePlan(content=text, destination=home / 'agents' / f'{worker}.md'))
     for agent in manifest.claude_only_agents:
         content = (root / 'agents' / f'{agent}.md').read_text(encoding='utf-8')

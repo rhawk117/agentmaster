@@ -48,7 +48,6 @@ def test_fresh_install_writes_everything(tmp_path: Path, repo_root, statuses) ->
 
     hooks = (
         'dispatch_guard.py',
-        'git_guard.py',
         'hooklib.py',
         'precompact_snapshot.py',
         'session_context.py',
@@ -84,19 +83,26 @@ def test_model_pin_only_in_plan_and_review(tmp_path: Path, repo_root) -> None:
     assert pin not in execute
 
 
-def test_scout_verbatim_implementer_rewritten(tmp_path: Path, repo_root) -> None:
+def test_workers_installed_verbatim(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
     install(repo_root, home, model='opus', dry_run=False)
 
-    scout = (home / 'agents' / 'scout.md').read_text(encoding='utf-8')
-    assert scout == render_worker('scout', 'claude')
+    for worker in ('scout', 'implementer'):
+        text = (home / 'agents' / f'{worker}.md').read_text(encoding='utf-8')
+        assert text == render_worker(worker, 'claude')
 
-    implementer = (home / 'agents' / 'implementer.md').read_text(encoding='utf-8')
+
+def test_cost_boundary_rewritten_in_skills(tmp_path: Path, repo_root) -> None:
+    home = tmp_path / 'claude-home'
+    install(repo_root, home, model='opus', dry_run=False)
+
     interpreter = Path(sys.executable).as_posix()
     home_posix = home.resolve().as_posix()
-    assert interpreter in implementer
-    assert f'"{interpreter}" "{home_posix}/agentmaster/hooks/git_guard.py"' in implementer
-    assert 'python3 "$HOME/.claude/agentmaster/hooks/git_guard.py"' not in implementer
+    rewritten = f'"{interpreter}" "{home_posix}/agentmaster/hooks/cost_boundary.py"'
+    for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
+        text = (home / 'skills' / skill / 'SKILL.md').read_text(encoding='utf-8')
+        assert rewritten in text
+        assert 'python3 "$HOME/.claude/agentmaster/hooks/cost_boundary.py"' not in text
 
 
 def test_second_install_is_idempotent(tmp_path: Path, repo_root, statuses) -> None:

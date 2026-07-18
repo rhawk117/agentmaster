@@ -8,24 +8,31 @@ from pathlib import Path
 import hooklib
 
 
-def _tokens_from_transcript(transcript_path: str, aid: str) -> str | int:
-    """Sum input/output tokens from the subagent transcript as a fallback."""
+def _transcript_stats(transcript_path: str, aid: str) -> tuple[str | int, str]:
+    """Sum input/output tokens and find the model from the subagent transcript."""
     if not (aid and transcript_path):
-        return ''
-    base = Path(transcript_path).parent
-    cands = [base / 'subagents' / f'agent-{aid}.jsonl', base / f'agent-{aid}.jsonl']
+        return '', ''
+    base = Path(transcript_path)
+    cands = [
+        base.with_suffix('') / 'subagents' / f'agent-{aid}.jsonl',
+        base.parent / 'subagents' / f'agent-{aid}.jsonl',
+        base.parent / f'agent-{aid}.jsonl',
+    ]
     for c in cands:
         with contextlib.suppress(Exception):
             tot = 0
+            model = ''
             for line in c.read_text().splitlines():
                 with contextlib.suppress(Exception):
-                    usage = json.loads(line).get('message', {}).get('usage', {})
+                    message = json.loads(line).get('message', {})
+                    usage = message.get('usage', {})
                     tot += int(usage.get('input_tokens', 0)) + int(
                         usage.get('output_tokens', 0)
                     )
-            if tot:
-                return tot
-    return ''
+                    model = model or str(message.get('model') or '')
+            if tot or model:
+                return tot or '', model
+    return '', ''
 
 
 def _consume_start(am: Path, aid: str) -> str:
@@ -51,10 +58,14 @@ def main() -> int:
         or (payload.get('usage') or {}).get('total_tokens')
         or ''
     )
-    if tokens == '':
-        tokens = _tokens_from_transcript(payload.get('transcript_path') or '', aid)
+    model = str(payload.get('model') or payload.get('agent_model') or '')
+    if tokens == '' or not model:
+        t_tokens, t_model = _transcript_stats(payload.get('transcript_path') or '', aid)
+        if tokens == '':
+            tokens = t_tokens
+        model = model or t_model
     duration_ms = _consume_start(am, aid) if aid else ''
-    hooklib.append_telemetry(payload, agent, tokens, duration_ms)
+    hooklib.append_telemetry(payload, agent, tokens, duration_ms, model)
     return 0
 
 

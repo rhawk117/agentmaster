@@ -1,9 +1,7 @@
 """Frozen manifest of worker frontmatter and per-platform substitutions.
 
 Every consumer takes a :class:`Manifest` by injection so tests can pass fakes.
-Frontmatter blocks are copied byte-for-byte from the committed agent files; the
-one deliberate edit is the implementer hook command, which now invokes the
-Python `git_guard.py` guard instead of the retired shell script.
+Frontmatter blocks are copied byte-for-byte from the committed agent files.
 """
 
 # ruff: noqa: E501 -- frontmatter descriptions are verbatim copy and exceed the line limit
@@ -66,12 +64,6 @@ model: sonnet
 maxTurns: 50
 color: green
 # isolation: worktree  # uncomment to give each implementer an isolated git worktree instead of relying on disjoint file ownership
-hooks:
-  PreToolUse:
-    - matcher: 'Bash'
-      hooks:
-        - type: command
-          command: 'python3 "$HOME/.claude/agentmaster/hooks/git_guard.py"'
 """,
 }
 
@@ -126,8 +118,8 @@ MANIFEST = Manifest(
     ),
     claude_only_agents=('explore',),
     claude_hooks=(
+        'cost_boundary.py',
         'dispatch_guard.py',
-        'git_guard.py',
         'hooklib.py',
         'precompact_snapshot.py',
         'session_context.py',
@@ -137,7 +129,6 @@ MANIFEST = Manifest(
     copilot_hooks=(
         'copilot_telemetry_post.py',
         'copilot_telemetry_pre.py',
-        'git_guard.py',
         'hooklib.py',
         'session_context.py',
     ),

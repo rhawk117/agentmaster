@@ -4,7 +4,7 @@ Composes the transactional actions core, the manifest, and the worker
 renderer into a single `install`/`uninstall` pair for the Copilot user
 scope. Ported from the retired shell installer: 4 rendered
 workers plus 3 re-pinned coordinator files under `home/agents/`, the 3
-router-skill trees under `home/skills/`, the 5 hook scripts under
+router-skill trees under `home/skills/`, the 4 hook scripts under
 `home/agentmaster-hooks/`, and a `home/hooks/agentmaster.json` event
 config that participates in the same classify/backup/dry-run pass.
 """
@@ -121,14 +121,11 @@ def _hook_entry(home: Path, hook: str) -> dict[str, object]:
     }
 
 
-def _hooks_json(home: Path, *, git_guard: bool) -> str:
-    pre_tool_use = [_hook_entry(home, 'copilot_telemetry_pre.py')]
-    if git_guard:
-        pre_tool_use.append(_hook_entry(home, 'git_guard.py'))
+def _hooks_json(home: Path) -> str:
     config = {
         'version': 1,
         'hooks': {
-            'preToolUse': pre_tool_use,
+            'preToolUse': [_hook_entry(home, 'copilot_telemetry_pre.py')],
             'postToolUse': [_hook_entry(home, 'copilot_telemetry_post.py')],
             'sessionStart': [_hook_entry(home, 'session_context.py')],
         },
@@ -142,7 +139,6 @@ def install(
     *,
     model: str,
     dry_run: bool,
-    git_guard: bool = True,
     manifest: Manifest = MANIFEST,
 ) -> InstallReport:
     """Install the agentmaster Copilot target into `home`.
@@ -159,7 +155,7 @@ def install(
         *_skill_plans(root, home, manifest),
         *_hook_plans(root, home, manifest),
         FilePlan(
-            content=_hooks_json(home, git_guard=git_guard),
+            content=_hooks_json(home),
             destination=home / 'hooks' / 'agentmaster.json',
         ),
     ]
