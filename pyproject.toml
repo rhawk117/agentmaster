@@ -17,3 +17,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "--strict-markers"
+markers = [
+    "subprocess: test spawns Python subprocesses (slower; deselect with -m 'not subprocess')",
+]

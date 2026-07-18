@@ -7,14 +7,7 @@ from pathlib import Path
 import pytest
 
 from installer.claude import default_home, install, uninstall
-from installer.manifest import Manifest
 from installer.render import render_worker
-
-ROOT = Path(__file__).resolve().parent.parent
-
-
-def _statuses(entries) -> list[str]:
-    return [status for status, _ in entries]
 
 
 def _agentmaster_entry_count(settings: dict) -> int:
@@ -40,12 +33,12 @@ def test_default_home_honors_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert default_home() == Path.home() / '.claude'
 
 
-def test_fresh_install_writes_everything(tmp_path: Path) -> None:
+def test_fresh_install_writes_everything(tmp_path: Path, repo_root, statuses) -> None:
     home = tmp_path / 'claude-home'
 
-    report = install(ROOT, home, model='opus', dry_run=False)
+    report = install(repo_root, home, model='opus', dry_run=False)
 
-    assert set(_statuses(report.entries)) == {'create'}
+    assert set(statuses(report.entries)) == {'create'}
 
     for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
         assert (home / 'skills' / skill / 'SKILL.md').is_file()
@@ -77,9 +70,9 @@ def test_fresh_install_writes_everything(tmp_path: Path) -> None:
     }
 
 
-def test_model_pin_only_in_plan_and_review(tmp_path: Path) -> None:
+def test_model_pin_only_in_plan_and_review(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
-    install(ROOT, home, model='opus', dry_run=False)
+    install(repo_root, home, model='opus', dry_run=False)
 
     pin = 'model: opus  # set by install.py'
     for skill in ('agentmaster-plan', 'agentmaster-review'):
@@ -91,9 +84,9 @@ def test_model_pin_only_in_plan_and_review(tmp_path: Path) -> None:
     assert pin not in execute
 
 
-def test_scout_verbatim_implementer_rewritten(tmp_path: Path) -> None:
+def test_scout_verbatim_implementer_rewritten(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
-    install(ROOT, home, model='opus', dry_run=False)
+    install(repo_root, home, model='opus', dry_run=False)
 
     scout = (home / 'agents' / 'scout.md').read_text(encoding='utf-8')
     assert scout == render_worker('scout', 'claude')
@@ -106,7 +99,7 @@ def test_scout_verbatim_implementer_rewritten(tmp_path: Path) -> None:
     assert 'python3 "$HOME/.claude/agentmaster/hooks/git_guard.py"' not in implementer
 
 
-def test_second_install_is_idempotent(tmp_path: Path) -> None:
+def test_second_install_is_idempotent(tmp_path: Path, repo_root, statuses) -> None:
     home = tmp_path / 'claude-home'
     home.mkdir()
     (home / 'settings.json').write_text(
@@ -124,13 +117,13 @@ def test_second_install_is_idempotent(tmp_path: Path) -> None:
         encoding='utf-8',
     )
 
-    install(ROOT, home, model='opus', dry_run=False)
+    install(repo_root, home, model='opus', dry_run=False)
     first = _read_settings(home)
     first_count = _agentmaster_entry_count(first)
 
-    report = install(ROOT, home, model='opus', dry_run=False)
+    report = install(repo_root, home, model='opus', dry_run=False)
 
-    assert 'create' not in _statuses(report.entries)
+    assert 'create' not in statuses(report.entries)
     second = _read_settings(home)
     assert _agentmaster_entry_count(second) == first_count
     assert second['keepme'] is True
@@ -141,16 +134,16 @@ def test_second_install_is_idempotent(tmp_path: Path) -> None:
     )
 
 
-def test_dry_run_writes_nothing(tmp_path: Path) -> None:
+def test_dry_run_writes_nothing(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
 
-    report = install(ROOT, home, model='opus', dry_run=True)
+    report = install(repo_root, home, model='opus', dry_run=True)
 
     assert report.entries
     assert not home.exists()
 
 
-def test_uninstall_removes_agentmaster_only(tmp_path: Path) -> None:
+def test_uninstall_removes_agentmaster_only(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
     home.mkdir()
     (home / 'settings.json').write_text(
@@ -167,7 +160,7 @@ def test_uninstall_removes_agentmaster_only(tmp_path: Path) -> None:
         encoding='utf-8',
     )
 
-    install(ROOT, home, model='opus', dry_run=False)
+    install(repo_root, home, model='opus', dry_run=False)
     uninstall(home, dry_run=False)
 
     for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
@@ -182,20 +175,6 @@ def test_uninstall_removes_agentmaster_only(tmp_path: Path) -> None:
     assert any(entry.get('matcher') == 'Bash' for entry in pre_tool)
 
 
-def _fake_manifest() -> Manifest:
-    return Manifest(
-        workers=('scout',),
-        claude_skills=('myskill',),
-        copilot_coordinators=(),
-        claude_only_agents=(),
-        claude_hooks=('myhook.py',),
-        copilot_hooks=(),
-        claude_frontmatter={'scout': 'name: scout\nmodel: haiku\n'},
-        copilot_frontmatter={},
-        substitutions={},
-    )
-
-
 def _build_fake_root(root: Path, *, with_hook: bool = True) -> None:
     (root / 'skills' / 'myskill').mkdir(parents=True)
     (root / 'skills' / 'myskill' / 'SKILL.md').write_text('skill\n', encoding='utf-8')
@@ -206,11 +185,16 @@ def _build_fake_root(root: Path, *, with_hook: bool = True) -> None:
         (root / 'hooks' / 'myhook.py').write_text('hook\n', encoding='utf-8')
 
 
-def test_fake_manifest_installs_exactly_its_files(tmp_path: Path) -> None:
+def test_fake_manifest_installs_exactly_its_files(tmp_path: Path, make_manifest) -> None:
     root = tmp_path / 'root'
     _build_fake_root(root)
     home = tmp_path / 'home'
-    manifest = _fake_manifest()
+    manifest = make_manifest(
+        workers=('scout',),
+        claude_skills=('myskill',),
+        claude_hooks=('myhook.py',),
+        claude_frontmatter={'scout': 'name: scout\nmodel: haiku\n'},
+    )
 
     install(root, home, model='opus', dry_run=False, manifest=manifest)
 
@@ -221,11 +205,18 @@ def test_fake_manifest_installs_exactly_its_files(tmp_path: Path) -> None:
     assert not (home / 'agents' / 'explore.md').exists()
 
 
-def test_preflight_missing_source_raises_and_writes_nothing(tmp_path: Path) -> None:
+def test_preflight_missing_source_raises_and_writes_nothing(
+    tmp_path: Path, make_manifest
+) -> None:
     root = tmp_path / 'root'
     _build_fake_root(root, with_hook=False)
     home = tmp_path / 'home'
-    manifest = _fake_manifest()
+    manifest = make_manifest(
+        workers=('scout',),
+        claude_skills=('myskill',),
+        claude_hooks=('myhook.py',),
+        claude_frontmatter={'scout': 'name: scout\nmodel: haiku\n'},
+    )
 
     with pytest.raises(FileNotFoundError):
         install(root, home, model='opus', dry_run=False, manifest=manifest)
@@ -233,23 +224,23 @@ def test_preflight_missing_source_raises_and_writes_nothing(tmp_path: Path) -> N
     assert not home.exists()
 
 
-def test_install_fails_closed_on_malformed_settings(tmp_path):
+def test_install_fails_closed_on_malformed_settings(tmp_path, repo_root):
     home = tmp_path / 'claude-home'
     home.mkdir()
     (home / 'settings.json').write_text('[]\n')
 
     with pytest.raises(ValueError, match=r'settings\.json'):
-        install(ROOT, home, model='opus', dry_run=False)
+        install(repo_root, home, model='opus', dry_run=False)
 
     assert not (home / 'skills').exists()
 
 
-def test_install_fails_closed_on_non_object_hooks(tmp_path):
+def test_install_fails_closed_on_non_object_hooks(tmp_path, repo_root):
     home = tmp_path / 'claude-home'
     home.mkdir()
     (home / 'settings.json').write_text('{"hooks": []}\n')
 
     with pytest.raises(ValueError, match='hooks'):
-        install(ROOT, home, model='opus', dry_run=False)
+        install(repo_root, home, model='opus', dry_run=False)
 
     assert not (home / 'skills').exists()

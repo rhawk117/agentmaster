@@ -7,7 +7,6 @@ import pytest
 from installer.actions import FilePlan, apply_plans, remove_paths
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
 
@@ -15,32 +14,28 @@ def _plan(tmp_path: Path, name: str, content: str) -> FilePlan:
     return FilePlan(content=content, destination=tmp_path / 'home' / name)
 
 
-def _statuses(entries: Sequence[tuple[str, Path]]) -> list[str]:
-    return [status for status, _ in entries]
-
-
-def test_fresh_install_creates_all(tmp_path: Path) -> None:
+def test_fresh_install_creates_all(tmp_path: Path, statuses) -> None:
     plans = [_plan(tmp_path, 'a.md', 'alpha\n'), _plan(tmp_path, 'sub/b.md', 'beta\n')]
 
     report = apply_plans(plans, backup_root=tmp_path / 'home', dry_run=False)
 
-    assert _statuses(report.entries) == ['create', 'create']
+    assert statuses(report.entries) == ['create', 'create']
     assert (tmp_path / 'home' / 'a.md').read_text() == 'alpha\n'
     assert (tmp_path / 'home' / 'sub' / 'b.md').read_text() == 'beta\n'
     assert report.backup_dir is None
 
 
-def test_rerun_identical_skips_all(tmp_path: Path) -> None:
+def test_rerun_identical_skips_all(tmp_path: Path, statuses) -> None:
     plans = [_plan(tmp_path, 'a.md', 'alpha\n')]
     apply_plans(plans, backup_root=tmp_path / 'home', dry_run=False)
 
     report = apply_plans(plans, backup_root=tmp_path / 'home', dry_run=False)
 
-    assert _statuses(report.entries) == ['skip']
+    assert statuses(report.entries) == ['skip']
     assert report.backup_dir is None
 
 
-def test_update_backs_up_original(tmp_path: Path) -> None:
+def test_update_backs_up_original(tmp_path: Path, statuses) -> None:
     home = tmp_path / 'home'
     apply_plans([_plan(tmp_path, 'a.md', 'original\n')], backup_root=home, dry_run=False)
 
@@ -48,24 +43,24 @@ def test_update_backs_up_original(tmp_path: Path) -> None:
         [_plan(tmp_path, 'a.md', 'changed\n')], backup_root=home, dry_run=False
     )
 
-    assert _statuses(report.entries) == ['update']
+    assert statuses(report.entries) == ['update']
     assert (home / 'a.md').read_text() == 'changed\n'
     assert report.backup_dir is not None
     assert report.backup_dir.name.startswith('agentmaster-backup-')
     assert (report.backup_dir / 'a.md').read_text() == 'original\n'
 
 
-def test_dry_run_reports_without_writing(tmp_path: Path) -> None:
+def test_dry_run_reports_without_writing(tmp_path: Path, statuses) -> None:
     home = tmp_path / 'home'
     plans = [_plan(tmp_path, 'a.md', 'alpha\n')]
 
     report = apply_plans(plans, backup_root=home, dry_run=True)
 
-    assert _statuses(report.entries) == ['create']
+    assert statuses(report.entries) == ['create']
     assert not home.exists()
 
 
-def test_dry_run_update_leaves_file_and_makes_no_backup(tmp_path: Path) -> None:
+def test_dry_run_update_leaves_file_and_makes_no_backup(tmp_path: Path, statuses) -> None:
     home = tmp_path / 'home'
     apply_plans([_plan(tmp_path, 'a.md', 'original\n')], backup_root=home, dry_run=False)
 
@@ -73,7 +68,7 @@ def test_dry_run_update_leaves_file_and_makes_no_backup(tmp_path: Path) -> None:
         [_plan(tmp_path, 'a.md', 'changed\n')], backup_root=home, dry_run=True
     )
 
-    assert _statuses(report.entries) == ['update']
+    assert statuses(report.entries) == ['update']
     assert (home / 'a.md').read_text() == 'original\n'
     assert report.backup_dir is None
 
@@ -106,7 +101,9 @@ def test_executable_plans_get_execute_bit(tmp_path: Path) -> None:
     assert mode & 0o111
 
 
-def test_remove_paths_removes_files_dirs_and_skips_missing(tmp_path: Path) -> None:
+def test_remove_paths_removes_files_dirs_and_skips_missing(
+    tmp_path: Path, statuses
+) -> None:
     target_file = tmp_path / 'a.md'
     target_file.write_text('x\n')
     target_dir = tmp_path / 'skill'
@@ -116,18 +113,18 @@ def test_remove_paths_removes_files_dirs_and_skips_missing(tmp_path: Path) -> No
 
     report = remove_paths([target_file, target_dir, missing], dry_run=False)
 
-    assert _statuses(report.entries) == ['remove', 'remove', 'skip']
+    assert statuses(report.entries) == ['remove', 'remove', 'skip']
     assert not target_file.exists()
     assert not target_dir.exists()
 
 
-def test_remove_paths_dry_run_removes_nothing(tmp_path: Path) -> None:
+def test_remove_paths_dry_run_removes_nothing(tmp_path: Path, statuses) -> None:
     target = tmp_path / 'a.md'
     target.write_text('x\n')
 
     report = remove_paths([target], dry_run=True)
 
-    assert _statuses(report.entries) == ['remove']
+    assert statuses(report.entries) == ['remove']
     assert target.exists()
 
 

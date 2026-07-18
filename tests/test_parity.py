@@ -1,24 +1,20 @@
 """Parity tests for single-sourced worker agent definitions."""
 
-import os
 import re
-import shutil
-import subprocess
-import sys
-from pathlib import Path
+
+import pytest
 
 from installer.manifest import MANIFEST, Manifest
 from installer.parity import validate
 from installer.render import generated_path, render_worker, sync_workers
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 PLATFORMS = ('claude', 'copilot')
 
 
-def test_rendered_matches_committed_files():
+def test_rendered_matches_committed_files(repo_root):
     for name in MANIFEST.workers:
         for platform in PLATFORMS:
-            path = generated_path(name, platform, REPO_ROOT)
+            path = generated_path(name, platform, repo_root)
             committed = path.read_text(encoding='utf-8')
             assert committed == render_worker(name, platform), (name, platform)
 
@@ -76,17 +72,21 @@ def test_scout_and_analyst_carry_plan_mode_caveat():
             assert phrase in normalized, (name, platform)
 
 
-def _seed_shared_bodies(root, names):
-    (root / 'shared' / 'agents').mkdir(parents=True, exist_ok=True)
-    for name in names:
-        source = REPO_ROOT / 'shared' / 'agents' / f'{name}.md'
-        (root / 'shared' / 'agents' / f'{name}.md').write_text(
-            source.read_text(encoding='utf-8'), encoding='utf-8'
-        )
+@pytest.fixture
+def seed_shared_bodies(repo_root):
+    def _seed(root, names):
+        (root / 'shared' / 'agents').mkdir(parents=True, exist_ok=True)
+        for name in names:
+            source = repo_root / 'shared' / 'agents' / f'{name}.md'
+            (root / 'shared' / 'agents' / f'{name}.md').write_text(
+                source.read_text(encoding='utf-8'), encoding='utf-8'
+            )
+
+    return _seed
 
 
-def test_sync_workers_idempotent(tmp_path):
-    _seed_shared_bodies(tmp_path, MANIFEST.workers)
+def test_sync_workers_idempotent(tmp_path, seed_shared_bodies):
+    seed_shared_bodies(tmp_path, MANIFEST.workers)
     first = sync_workers(tmp_path)
     contents_first = {p: p.read_text(encoding='utf-8') for p in first}
     second = sync_workers(tmp_path)
@@ -95,7 +95,7 @@ def test_sync_workers_idempotent(tmp_path):
     assert contents_first == contents_second
 
 
-def test_injected_manifest_overrides_default(tmp_path):
+def test_injected_manifest_overrides_default(tmp_path, seed_shared_bodies):
     fake = Manifest(
         workers=('scout', 'implementer'),
         claude_skills=(),
@@ -113,7 +113,7 @@ def test_injected_manifest_overrides_default(tmp_path):
         },
         substitutions={'%USES_RULE%': {'claude': 'FAKE RULE.', 'copilot': 'FAKE RULE.'}},
     )
-    _seed_shared_bodies(tmp_path, fake.workers)
+    seed_shared_bodies(tmp_path, fake.workers)
     rendered = render_worker('scout', 'claude', manifest=fake)
     assert 'model: fake-model' in rendered
     assert 'model: haiku' not in rendered
@@ -125,73 +125,56 @@ def test_injected_manifest_overrides_default(tmp_path):
     assert 'MANIFEST' not in implementer_out
 
 
-def test_manifest_hook_files_exist():
+def test_manifest_hook_files_exist(repo_root):
     for name in (*MANIFEST.claude_hooks, *MANIFEST.copilot_hooks):
-        assert (REPO_ROOT / 'hooks' / name).is_file(), name
+        assert (repo_root / 'hooks' / name).is_file(), name
 
 
-def _copy_repo(tmp_path: Path) -> Path:
-    dest = tmp_path / 'repo'
-    shutil.copytree(
-        REPO_ROOT,
-        dest,
-        ignore=shutil.ignore_patterns(
-            '.git', '.venv', '__pycache__', '.superpowers', '.agentmaster'
-        ),
-    )
-    return dest
-
-
-def test_render_worker_honors_root(tmp_path):
-    copy = _copy_repo(tmp_path)
-    body = copy / 'shared' / 'agents' / 'scout.md'
+def test_render_worker_honors_root(repo_copy):
+    body = repo_copy / 'shared' / 'agents' / 'scout.md'
     body.write_text(body.read_text(encoding='utf-8') + '\nExtra root sentence.\n')
 
-    assert 'Extra root sentence.' in render_worker('scout', 'claude', root=copy)
+    assert 'Extra root sentence.' in render_worker('scout', 'claude', root=repo_copy)
     assert 'Extra root sentence.' not in render_worker('scout', 'claude')
 
 
-def test_validate_clean_tree(tmp_path):
-    assert validate(_copy_repo(tmp_path)) == []
+def test_validate_clean_tree(repo_copy):
+    assert validate(repo_copy) == []
 
 
-def test_validate_detects_generated_drift(tmp_path):
-    copy = _copy_repo(tmp_path)
-    drifted = copy / 'agents' / 'scout.md'
+def test_validate_detects_generated_drift(repo_copy):
+    drifted = repo_copy / 'agents' / 'scout.md'
     drifted.write_text(drifted.read_text(encoding='utf-8') + 'x\n')
 
-    findings = validate(copy)
+    findings = validate(repo_copy)
 
     assert len(findings) == 1
     assert 'agents/scout.md' in findings[0]
 
 
-def test_validate_detects_criteria_drift(tmp_path):
-    copy = _copy_repo(tmp_path)
-    target = copy / 'skills' / 'agentmaster-review' / 'SKILL.md'
+def test_validate_detects_criteria_drift(repo_copy):
+    target = repo_copy / 'skills' / 'agentmaster-review' / 'SKILL.md'
     text = target.read_text(encoding='utf-8')
     start = '<!-- agentmaster:criteria:start -->'
     target.write_text(text.replace(start, start + '\ninjected drift line'))
 
-    findings = validate(copy)
+    findings = validate(repo_copy)
 
     assert any('agentmaster-review/SKILL.md' in f for f in findings)
 
 
-def test_validate_detects_missing_shared_body(tmp_path):
-    copy = _copy_repo(tmp_path)
-    (copy / 'shared' / 'agents' / 'scout.md').unlink()
+def test_validate_detects_missing_shared_body(repo_copy):
+    (repo_copy / 'shared' / 'agents' / 'scout.md').unlink()
 
-    findings = validate(copy)
+    findings = validate(repo_copy)
 
     assert any('shared/agents/scout.md' in f for f in findings)
 
 
-def test_validate_detects_stray_worker_file(tmp_path):
-    copy = _copy_repo(tmp_path)
-    (copy / 'agents' / 'rogue.md').write_text('---\nname: rogue\n---\n\nrogue\n')
+def test_validate_detects_stray_worker_file(repo_copy):
+    (repo_copy / 'agents' / 'rogue.md').write_text('---\nname: rogue\n---\n\nrogue\n')
 
-    findings = validate(copy)
+    findings = validate(repo_copy)
 
     assert any('rogue.md' in f for f in findings)
 
@@ -216,26 +199,14 @@ def test_validate_with_injected_manifest(tmp_path):
     assert validate(root, fake) == []
 
 
-def _run_cli(args, cwd, env_extra=None):
-    env = dict(os.environ)
-    env.update(env_extra or {})
-    return subprocess.run(  # noqa: S603
-        [sys.executable, 'install.py', *args],
-        cwd=str(cwd),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-
-
-def test_cli_install_dry_run_writes_nothing(tmp_path):
+@pytest.mark.subprocess
+def test_cli_install_dry_run_writes_nothing(tmp_path, run_cli, repo_root):
     claude_home = tmp_path / 'claude-home'
     copilot_home = tmp_path / 'copilot-home'
 
-    result = _run_cli(
+    result = run_cli(
         ['install', '--target', 'all', '--dry-run'],
-        cwd=REPO_ROOT,
+        cwd=repo_root,
         env_extra={
             'CLAUDE_CONFIG_DIR': str(claude_home),
             'COPILOT_CONFIG_DIR': str(copilot_home),
@@ -248,36 +219,37 @@ def test_cli_install_dry_run_writes_nothing(tmp_path):
     assert not copilot_home.exists()
 
 
-def test_cli_validate_clean_exits_zero():
-    result = _run_cli(['validate', '--target', 'all'], cwd=REPO_ROOT)
+@pytest.mark.subprocess
+def test_cli_validate_clean_exits_zero(run_cli, repo_root):
+    result = run_cli(['validate', '--target', 'all'], cwd=repo_root)
 
     assert result.returncode == 0, result.stderr
 
 
-def test_cli_validate_drift_exits_one(tmp_path):
-    copy = _copy_repo(tmp_path)
-    drifted = copy / 'agents' / 'scout.md'
+@pytest.mark.subprocess
+def test_cli_validate_drift_exits_one(repo_copy, run_cli):
+    drifted = repo_copy / 'agents' / 'scout.md'
     drifted.write_text(drifted.read_text(encoding='utf-8') + 'x\n')
 
-    result = _run_cli(['validate', '--target', 'all'], cwd=copy)
+    result = run_cli(['validate', '--target', 'all'], cwd=repo_copy)
 
     assert result.returncode == 1
     assert 'scout.md' in result.stdout + result.stderr
 
 
-def test_cli_sync_is_idempotent_on_clean_tree(tmp_path):
-    copy = _copy_repo(tmp_path)
-
-    result = _run_cli(['sync'], cwd=copy)
+@pytest.mark.subprocess
+def test_cli_sync_is_idempotent_on_clean_tree(repo_copy, run_cli):
+    result = run_cli(['sync'], cwd=repo_copy)
 
     assert result.returncode == 0, result.stderr
-    assert validate(copy) == []
+    assert validate(repo_copy) == []
 
 
-def test_cli_rejects_invalid_model():
-    result = _run_cli(
+@pytest.mark.subprocess
+def test_cli_rejects_invalid_model(run_cli, repo_root):
+    result = run_cli(
         ['install', '--target', 'claude', '--model', 'bad model!', '--dry-run'],
-        cwd=REPO_ROOT,
+        cwd=repo_root,
     )
 
     assert result.returncode != 0

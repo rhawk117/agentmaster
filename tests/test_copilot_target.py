@@ -7,13 +7,6 @@ from pathlib import Path
 import pytest
 
 from installer.copilot import default_home, install, uninstall
-from installer.manifest import Manifest
-
-ROOT = Path(__file__).resolve().parent.parent
-
-
-def _statuses(entries: list) -> list[str]:
-    return [status for status, _ in entries]
 
 
 def _hook_commands(agentmaster_json: Path) -> list[str]:
@@ -30,12 +23,12 @@ def _referenced_hook(command: str) -> Path:
     return Path(hook_path)
 
 
-def test_fresh_install_creates_everything(tmp_path: Path) -> None:
+def test_fresh_install_creates_everything(tmp_path: Path, repo_root, statuses) -> None:
     home = tmp_path / 'copilot-home'
 
-    report = install(ROOT, home, model='opus-test', dry_run=False)
+    report = install(repo_root, home, model='opus-test', dry_run=False)
 
-    assert set(_statuses(report.entries)) == {'create'}
+    assert set(statuses(report.entries)) == {'create'}
     agents = sorted(p.name for p in (home / 'agents').glob('*.agent.md'))
     assert len(agents) == 7
     for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
@@ -50,10 +43,10 @@ def test_fresh_install_creates_everything(tmp_path: Path) -> None:
         assert _referenced_hook(command).is_file()
 
 
-def test_coordinators_repinned_workers_keep_pins(tmp_path: Path) -> None:
+def test_coordinators_repinned_workers_keep_pins(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'copilot-home'
 
-    install(ROOT, home, model='opus-test', dry_run=False)
+    install(repo_root, home, model='opus-test', dry_run=False)
 
     for coordinator in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
         text = (home / 'agents' / f'{coordinator}.agent.md').read_text(encoding='utf-8')
@@ -62,19 +55,19 @@ def test_coordinators_repinned_workers_keep_pins(tmp_path: Path) -> None:
     assert 'model: claude-haiku-4.5\n' in scout
 
 
-def test_git_guard_enabled_by_default(tmp_path: Path) -> None:
+def test_git_guard_enabled_by_default(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'copilot-home'
 
-    install(ROOT, home, model='opus-test', dry_run=False)
+    install(repo_root, home, model='opus-test', dry_run=False)
 
     commands = _hook_commands(home / 'hooks' / 'agentmaster.json')
     assert any('git_guard.py' in command for command in commands)
 
 
-def test_git_guard_disabled_omits_entry(tmp_path: Path) -> None:
+def test_git_guard_disabled_omits_entry(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'copilot-home'
 
-    install(ROOT, home, model='opus-test', dry_run=False, git_guard=False)
+    install(repo_root, home, model='opus-test', dry_run=False, git_guard=False)
 
     config = json.loads((home / 'hooks' / 'agentmaster.json').read_text(encoding='utf-8'))
     assert len(config['hooks']['preToolUse']) == 1
@@ -82,27 +75,27 @@ def test_git_guard_disabled_omits_entry(tmp_path: Path) -> None:
     assert not any('git_guard.py' in command for command in commands)
 
 
-def test_idempotent_rerun_creates_nothing(tmp_path: Path) -> None:
+def test_idempotent_rerun_creates_nothing(tmp_path: Path, repo_root, statuses) -> None:
     home = tmp_path / 'copilot-home'
-    install(ROOT, home, model='opus-test', dry_run=False)
+    install(repo_root, home, model='opus-test', dry_run=False)
 
-    report = install(ROOT, home, model='opus-test', dry_run=False)
+    report = install(repo_root, home, model='opus-test', dry_run=False)
 
-    assert 'create' not in _statuses(report.entries)
+    assert 'create' not in statuses(report.entries)
 
 
-def test_dry_run_writes_nothing(tmp_path: Path) -> None:
+def test_dry_run_writes_nothing(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'copilot-home'
 
-    report = install(ROOT, home, model='opus-test', dry_run=True)
+    report = install(repo_root, home, model='opus-test', dry_run=True)
 
     assert report.entries
     assert not home.exists()
 
 
-def test_uninstall_removes_ours_and_spares_others(tmp_path: Path) -> None:
+def test_uninstall_removes_ours_and_spares_others(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'copilot-home'
-    install(ROOT, home, model='opus-test', dry_run=False)
+    install(repo_root, home, model='opus-test', dry_run=False)
     other = home / 'hooks' / 'other.json'
     other.write_text('{}\n', encoding='utf-8')
 
@@ -125,20 +118,6 @@ def test_default_home_env_override(
     assert default_home() == Path.home() / '.copilot'
 
 
-def _fake_manifest() -> Manifest:
-    return Manifest(
-        workers=('scout',),
-        claude_skills=(),
-        copilot_coordinators=('co',),
-        claude_only_agents=(),
-        claude_hooks=(),
-        copilot_hooks=('myhook.py',),
-        claude_frontmatter={},
-        copilot_frontmatter={'scout': 'name: scout\nmodel: claude-haiku-4.5\n'},
-        substitutions={'%USES_RULE%': {'claude': 'x', 'copilot': 'y'}},
-    )
-
-
 def _build_fake_root(root: Path) -> None:
     (root / 'copilot' / 'agents').mkdir(parents=True)
     (root / 'copilot' / 'agents' / 'co.agent.md').write_text(
@@ -156,11 +135,17 @@ def _build_fake_root(root: Path) -> None:
     )
 
 
-def test_fake_manifest_installs_only_declared(tmp_path: Path) -> None:
+def test_fake_manifest_installs_only_declared(tmp_path: Path, make_manifest) -> None:
     fake_root = tmp_path / 'root'
     _build_fake_root(fake_root)
     home = tmp_path / 'copilot-home'
-    manifest = _fake_manifest()
+    manifest = make_manifest(
+        workers=('scout',),
+        copilot_coordinators=('co',),
+        copilot_hooks=('myhook.py',),
+        copilot_frontmatter={'scout': 'name: scout\nmodel: claude-haiku-4.5\n'},
+        substitutions={'%USES_RULE%': {'claude': 'x', 'copilot': 'y'}},
+    )
 
     install(fake_root, home, model='m1', dry_run=False, manifest=manifest)
 
@@ -177,12 +162,20 @@ def test_fake_manifest_installs_only_declared(tmp_path: Path) -> None:
     assert sorted(p.name for p in (home / 'agentmaster-hooks').iterdir()) == ['myhook.py']
 
 
-def test_preflight_missing_source_raises_and_writes_nothing(tmp_path: Path) -> None:
+def test_preflight_missing_source_raises_and_writes_nothing(
+    tmp_path: Path, make_manifest
+) -> None:
     fake_root = tmp_path / 'root'
     _build_fake_root(fake_root)
     (fake_root / 'copilot' / 'agents' / 'co.agent.md').unlink()
     home = tmp_path / 'copilot-home'
-    manifest = _fake_manifest()
+    manifest = make_manifest(
+        workers=('scout',),
+        copilot_coordinators=('co',),
+        copilot_hooks=('myhook.py',),
+        copilot_frontmatter={'scout': 'name: scout\nmodel: claude-haiku-4.5\n'},
+        substitutions={'%USES_RULE%': {'claude': 'x', 'copilot': 'y'}},
+    )
 
     with pytest.raises(FileNotFoundError):
         install(fake_root, home, model='m1', dry_run=False, manifest=manifest)
