@@ -1,8 +1,12 @@
 # agentmaster
 
+[![quality](https://github.com/rhawk117/agentmaster/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/rhawk117/agentmaster/actions/workflows/quality.yml)
+[![release](https://img.shields.io/github/v/release/rhawk117/agentmaster)](https://github.com/rhawk117/agentmaster/releases/latest)
+
+Claude Code & GitHub Copilot skills & agents built with the premise:
 Expensive head, cheap hands. A master decision-maker on a frontier reasoning
 model that never touches the repository, commanding subagent workers that do
-all the reading, running, and writing — with adversarial gates at both ends:
+all the reading, running, and writing with adversarial gates at both ends:
 a critic that assumes the plan is wrong before anything is built, and a
 reviewer that assumes the code is guilty after it is. Language-agnostic:
 every stage runs the project's own toolchain, detected at plan time.
