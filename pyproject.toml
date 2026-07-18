@@ -9,6 +9,10 @@ dependencies = []
 [dependency-groups]
 dev = [
     "bashate>=2.1.1",
+    "pytest>=8.3",
     "ruff>=0.15.22",
     "ty>=0.0.61",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

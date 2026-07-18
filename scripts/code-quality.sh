@@ -53,9 +53,15 @@ run_typecheck() {
 
 run_pycompile() {
     local failed=0
+    local -a targets=()
+    local path
+
+    for path in install.py installer hooks scripts tests; do
+        [[ -e "$path" ]] && targets+=("$path")
+    done
 
     log_step "py-compile"
-    if ! uv run python -m compileall -q app/ test/; then
+    if [[ ${#targets[@]} -gt 0 ]] && ! uv run python -m compileall -q "${targets[@]}"; then
         log_error "Compile check failed"
         failed=1
     fi
