@@ -7,6 +7,7 @@ import pytest
 from installer.actions import FilePlan, apply_plans, remove_paths
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 
@@ -14,7 +15,7 @@ def _plan(tmp_path: Path, name: str, content: str) -> FilePlan:
     return FilePlan(content=content, destination=tmp_path / 'home' / name)
 
 
-def _statuses(entries: list[tuple[str, Path]]) -> list[str]:
+def _statuses(entries: Sequence[tuple[str, Path]]) -> list[str]:
     return [status for status, _ in entries]
 
 
