@@ -1,0 +1,84 @@
+{
+  "skill_name": "agentmaster",
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "js-plan-toolchain-and-boundary",
+      "prompt": "/agentmaster-plan add per-user rate limiting to the Express API in this repo",
+      "expected_output": "A plan whose Toolchain section records npm/Node commands with manifest evidence (no Python assumptions); evidence gathered only via scout/code-analyst dispatches with a ledger snapshot at .agentmaster/ledger.md; disjoint parallel groups; Shared resources section; execution contract as the first plan lines; open questions surfaced.",
+      "files": [],
+      "assertions": [
+        "Plan contains a Toolchain section whose commands come from package.json or CI config, cited by file",
+        "Transcript shows zero direct Read/Grep/Glob/Bash calls by the orchestrator",
+        "Every parallel group's file set is disjoint from every other group's",
+        "The plan's first lines are the agentmaster-execute execution contract",
+        "A ledger file exists at .agentmaster/ledger.md and plan claims cite ledger entries",
+        "A Shared resources section names owners or SERIALIZE markers"
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "headless-go-plan",
+      "prompt": "/agentmaster-plan --headless fix the flaky TestCheckoutRetry failure in this Go service",
+      "expected_output": "A headless run: no AskUserQuestion calls; Go toolchain commands recorded; ambiguous decisions recorded as ASSUMED with rationale in Open Questions, or a BLOCKED: report if no safe default exists.",
+      "files": [],
+      "assertions": [
+        "No AskUserQuestion tool call appears in the transcript",
+        "Toolchain section records go test/vet or equivalent with evidence",
+        "Each unresolved decision is marked ASSUMED with a rationale, or the output is a BLOCKED: report naming the human decision needed"
+      ]
+    },
+    {
+      "id": 3,
+      "eval_name": "execution-chain-and-reverification",
+      "prompt": "/agentmaster-execute evals/fixtures/toy-plan.md",
+      "expected_output": "Both groups dispatched as implementers in one message; the serialized-tagged verification is run by a scout after group completion, not by an implementer; at least one verification per group independently re-run; the run chains into agentmaster-review and ends with a verdict and a cost appendix.",
+      "files": [
+        "evals/fixtures/toy-plan.md"
+      ],
+      "assertions": [
+        "Implementer dispatches for independent groups occur in a single message",
+        "The task tagged verification: serialized is verified by a scout dispatch, not inside an implementer report",
+        "At least one per-group verification is re-run independently of implementer claims",
+        "agentmaster-review is invoked after gates pass",
+        "The output ends with a cost appendix and .agentmaster/telemetry.md is written"
+      ]
+    },
+    {
+      "id": 4,
+      "eval_name": "seeded-flaw-review-calibration",
+      "prompt": "/agentmaster-review main..feature",
+      "expected_output": "Against a branch seeded with a missing authorization check and a duplicated helper: the authz gap is an accepted security finding at blocker or major; the duplication is a structure finding capped at major; any speculative-generality suggestion is rejected under the YAGNI counter-rule; verdict FIX REQUIRED with fix tasks in plan-task format.",
+      "files": [],
+      "assertions": [
+        "The missing authorization check is an accepted finding on the security axis",
+        "The duplicated helper is an accepted structure finding with severity no higher than major",
+        "At least one rejection cites the YAGNI counter-rule or evidence, and no finding is accepted without a ruling",
+        "Verdict is FIX REQUIRED and fix tasks include file ownership and verification commands"
+      ]
+    },
+    {
+      "id": 5,
+      "eval_name": "trigger-gating",
+      "prompt": "can you plan this refactor out for me?",
+      "expected_output": "agentmaster-plan does NOT auto-invoke (disable-model-invocation). Claude either plans conversationally or suggests running /agentmaster-plan explicitly; the elevated pipeline never starts on its own.",
+      "files": [],
+      "assertions": [
+        "The agentmaster-plan skill is not invoked in the transcript",
+        "The response either handles the request directly or recommends /agentmaster-plan as an explicit next step"
+      ]
+    },
+    {
+      "id": 6,
+      "eval_name": "proportionality-lite-triage",
+      "prompt": "/agentmaster-plan fix the typo in the README heading",
+      "expected_output": "The proportionality gate fires: the orchestrator recommends skipping agentmaster (or takes the lite path) instead of running the full ceremony \u2014 no multi-batch evidence gathering, no multi-group plan.",
+      "files": [],
+      "assertions": [
+        "The response recommends making the change directly or uses the lite path",
+        "No more than one evidence dispatch occurs",
+        "No multi-group parallel plan is produced"
+      ]
+    }
+  ]
+}
