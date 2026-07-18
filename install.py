@@ -15,15 +15,24 @@ Exit code is 0 on success, 1 on any failure or validation finding.
 
 from __future__ import annotations
 
-import argparse
-import re
 import sys
-from pathlib import Path
-from typing import TYPE_CHECKING
 
-from installer import claude, copilot
-from installer.parity import validate
-from installer.render import sync_workers
+if sys.version_info < (3, 14):
+    sys.stderr.write(
+        'agentmaster installer requires Python 3.14+ (running '
+        f'{sys.version_info.major}.{sys.version_info.minor}). '
+        'Run it with a newer interpreter, e.g.: uv run python install.py ...\n'
+    )
+    raise SystemExit(1)
+
+import argparse  # noqa: E402
+import re  # noqa: E402
+from pathlib import Path  # noqa: E402
+from typing import TYPE_CHECKING  # noqa: E402
+
+from installer import claude, copilot  # noqa: E402
+from installer.parity import validate  # noqa: E402
+from installer.render import sync_workers  # noqa: E402
 
 if TYPE_CHECKING:
     from installer.actions import InstallReport
