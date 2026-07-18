@@ -9,14 +9,42 @@ every stage runs the project's own toolchain, detected at plan time.
 
 Works on Claude Code (skills + agents) and GitHub Copilot (custom agents).
 
+## Quick start
+
+```bash
+git clone https://github.com/rhawk117/agentmaster && cd agentmaster
+python install.py install                  # both platforms; add --target claude|copilot
+python install.py install --dry-run        # preview every file first
+python install.py uninstall --target all   # clean removal, hook entries stripped
+```
+
+Python 3.14+ is the only requirement — the installer is stdlib-only, so there
+are no dependencies to install. Explicit flags always win; when a flag is
+absent and the session is a TTY the installer prompts for the model and
+git-guard choices, and a non-TTY session takes the defaults silently
+(`--model` overrides the model pin either way). Every file it would overwrite
+is copied first into a timestamped `agentmaster-backup-<timestamp>/` under the
+config home, and the five hook events it merges into `settings.json` are
+merged idempotently, never clobbering hooks you already have. The
+superpowers-plugin check prints the exact install commands when the plugin is
+missing.
+
+After a Claude Code install, restart once if `~/.claude/skills/` or
+`~/.claude/agents/` were newly created. Keep `CLAUDE_CODE_SUBAGENT_MODEL`
+unset — it silently overrides every worker's model pin — and the shipped
+`Explore` override keeps Claude's automatic exploration on haiku. Copilot
+platform specifics live in [`copilot/README.md`](copilot/README.md).
+
+No clone needed for a pinned version: each GitHub Release attaches
+`agentmaster-<tag>.zip` — unzip it and run the same `install.py` commands.
+
 ## Requirements
 
 The superpowers plugin (obra) is required on both platforms — the plan
 phase uses `brainstorming` and `writing-plans`, and the handoff offers
-`executing-plans`. Both installers detect it and offer to install it from
-`obra/superpowers-marketplace`; without it, plan formalization falls back
+`executing-plans`. The installer detects it and prints the install commands
+for `obra/superpowers-marketplace`; without it, plan formalization falls back
 to inline structure, which works but is not the supported configuration.
-Workers assume nothing else beyond the project's own toolchain.
 
 ## The pipeline
 
@@ -61,47 +89,6 @@ particular runner; the security axis uses whatever the ecosystem provides
 (bandit/semgrep, eslint security rules, npm audit, gosec, cargo audit,
 SpotBugs, …).
 
-## Install
-
-### Claude Code
-
-```bash
-bash install-claude.sh
-```
-
-The installer checks for superpowers (offering to install it), asks which
-frontier model plan and review should run, installs the three skills and
-five agents with backups, removes legacy `delegated-*` names on request, and
-wires the hook layer: hook scripts to `~/.claude/agentmaster/hooks/` plus an
-idempotent merge of five events into `~/.claude/settings.json` that never
-touches your existing hooks (a timestamped backup is taken anyway). Manual
-install remains:
-
-```bash
-cp -r skills/* ~/.claude/skills/
-cp agents/*.md ~/.claude/agents/
-# migrating from the delegated-* names:
-rm -rf ~/.claude/skills/delegated-planning ~/.claude/skills/delegated-review \
-       ~/.claude/skills/delegated-execution
-```
-
-Restart once if `~/.claude/skills/` or `~/.claude/agents/` are new. Keep
-`CLAUDE_CODE_SUBAGENT_MODEL` unset — it silently overrides every worker's
-model pin. The shipped `Explore` override keeps Claude's automatic
-exploration on haiku.
-
-### GitHub Copilot
-
-```bash
-bash install-copilot.sh
-```
-
-The installer checks for the superpowers plugin (and offers to install it),
-asks which frontier model the coordinators should run (default Opus 4.8),
-backs up existing agents, installs all seven, and offers to remove legacy
-`delegated-*` files from a pre-rebrand install. Platform specifics live in
-`copilot/README.md`.
-
 ## Models and cost
 
 Coordinators pin the frontier model (Opus 4.8 here — swap the `model` lines
@@ -111,6 +98,75 @@ elevation is per-skill, so everyday sessions stay cheap; on Copilot the
 billing is multiplier-based, and pinning `scout` to a 0x included model
 makes evidence gathering effectively free. Worker `maxTurns` and `effort`
 values are the runaway-spend caps — tune per repo size.
+
+## Telemetry
+
+The hook layer appends `hook,<agent>,,<tokens>,<duration_ms>` rows to
+`.agentmaster/telemetry.md` — tokens from the payload where the platform
+reports them, wall-clock duration from a start/stop timestamp pair. Read the
+running totals with `make telemetry` (or `uv run python
+scripts/telemetry_report.py`). Prune with `make clean-telemetry`: it keeps the
+newest 500 lines and 5 compaction snapshots and drops `.starts` orphans older
+than a day (`--keep-lines`, `--keep-snapshots`, and `--dry-run` adjust that).
+Nothing prunes automatically — the hooks only ever append, so pruning is
+always an explicit choice.
+
+## Claude Code hook layer
+
+Six lifecycle hooks convert protocol into mechanism, unique to Claude Code.
+The hooks are Python scripts installed to `~/.claude/agentmaster/hooks/` and
+registered idempotently in `~/.claude/settings.json` (your existing hooks are
+never touched): `SubagentStart`/`SubagentStop` (roster-scoped) measure every
+worker dispatch into the telemetry file described above, so telemetry no
+longer depends on the orchestrator remembering; a `PreToolUse` guard on the
+`Agent`/`Task` tools blocks all dispatch while `CLAUDE_CODE_SUBAGENT_MODEL`
+is exported, since that variable silently defeats the tiering; `PreCompact`
+snapshots `.agentmaster/` into `.agentmaster/compaction-snapshots/` before
+compaction; `SessionStart` injects a re-hydration pointer whenever a project
+carries agentmaster artifacts; and the implementer carries a frontmatter
+`git-guard` (default-deny on git subcommands with a read-only allowlist —
+the operator owns git, enforced only while an implementer runs). All scripts
+parse hook JSON permissively across CLI versions; `AGENTMASTER_HOOK_DEBUG=1`
+dumps raw payloads to `.agentmaster/hook-debug.jsonl` for one-run
+verification.
+
+## Development
+
+One command verifies the repository, and CI runs exactly it:
+
+```bash
+make check                          # ruff format+check, bashate, ty, compileall+pytest, parity validation
+bash scripts/code-quality.sh all    # identical; use where make is absent
+```
+
+`make help` lists every target — itself included; the rest are `check`,
+`lint`, `shell`, `typecheck`,
+`test`, `format`, `validate`, `sync`, `install`, `install-claude`,
+`install-copilot`, `uninstall`, `telemetry`, and `clean-telemetry`.
+
+Worker agent prompts are generated: edit `shared/agents/<name>.md` and run
+`make sync` (equivalently `python install.py sync`). `make validate` fails on
+any undeclared drift between the shared sources and the committed
+Claude/Copilot copies, and the same command re-syncs the review-criteria block
+from `criteria/review-criteria.md`. Requires Python 3.14+ and
+[uv](https://docs.astral.sh/uv/).
+
+## Releasing
+
+Bump `version` in `pyproject.toml` and commit it, then tag and push:
+
+```bash
+git tag v<version> && git push origin v<version>
+```
+
+The `release.yml` workflow re-runs the full quality gate, rejects any tag
+whose `v<version>` does not equal the `pyproject.toml` version, builds the
+runtime bundle `agentmaster-<tag>.zip` (`install.py`, `installer/`, `shared/`,
+`agents/`, `copilot/`, `skills/`, `hooks/`, `criteria/`,
+`scripts/telemetry_report.py`, `README.md`, `LICENSE`, `pyproject.toml` — no
+tests or `.github/`), attaches it to a GitHub Release, and auto-generates the
+notes. A failed gate means no release: delete the tag, fix the failure, and
+re-tag.
 
 ## Hardening: how each former weakness is now addressed
 
@@ -142,8 +198,8 @@ values are the runaway-spend caps — tune per repo size.
    highest-risk verification of every group via scout before the gate;
    serialized verifications are always scout-run, never implementer-claimed.
 7. Criteria triplication → single source of truth: `criteria/review-criteria.md`
-   injected between markers into all three carriers by `./sync-criteria.sh`.
-   Edit the master, run the script; the copies are generated, not maintained.
+   injected between markers into all three carriers by `python install.py sync`.
+   Edit the master, run the command; the copies are generated, not maintained.
 8. `/fleet` foot-gun → the plan document opens with an execution contract
    instructing any fleet/autopilot/generic agent that reads it to stop and
    hand back to `agentmaster-execute` — the artifact defends itself even
@@ -164,23 +220,6 @@ values are the runaway-spend caps — tune per repo size.
     readable `BLOCKED:` report when no safe default exists. CI entry:
     `claude -p "/agentmaster-plan --headless <task>"`.
 
-## Claude Code hook layer
-
-Six lifecycle hooks convert protocol into mechanism, unique to Claude Code:
-`SubagentStart`/`SubagentStop` (roster-scoped) measure every worker dispatch
-into `.agentmaster/telemetry.md` — tokens from the payload or summed from
-the subagent transcript, duration from a start-timestamp pair — so telemetry
-no longer depends on the orchestrator remembering; a `PreToolUse` guard on
-the `Agent` tool blocks all dispatch while `CLAUDE_CODE_SUBAGENT_MODEL` is
-exported, since that variable silently defeats the tiering; `PreCompact`
-snapshots `.agentmaster/` before compaction; `SessionStart` injects a
-re-hydration pointer whenever a project carries agentmaster artifacts; and
-the implementer carries a frontmatter `git-guard` (default-deny on git
-subcommands with a read-only allowlist — the operator owns git, enforced
-only while an implementer runs). All scripts parse hook JSON permissively
-across CLI versions; `AGENTMASTER_HOOK_DEBUG=1` dumps raw payloads to
-`.agentmaster/hook-debug.jsonl` for one-run verification.
-
 ## Research-driven revisions
 
 The v2 pass applies the multi-agent literature's strongest critiques of the
@@ -192,7 +231,5 @@ gap parallel mode leaves; a proportionality gate (and `--lite`) keeps the
 recommending no pipeline at all for trivial changes; serialized
 verifications batch into one dispatch; telemetry follows a fixed
 `phase,agent,model,tokens,duration_ms` schema summarized by
-`./telemetry-report.sh`; and `./sync-criteria.sh --check` fails CI on
-criteria drift.
-
-
+`scripts/telemetry_report.py`; and `python install.py validate --target all`
+fails CI on criteria or generated-file drift.

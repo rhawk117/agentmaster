@@ -24,7 +24,7 @@ The scripted path handles everything below — superpowers check, model
 selection, backups, and conflict cleanup:
 
 ```bash
-./install-copilot.sh
+python install.py install --target copilot
 ```
 
 Or manually:
@@ -57,7 +57,7 @@ Headless/CI: run `copilot -p "..." --no-ask-user` with `--headless` in the
 task; coordinators substitute ASSUMED least-destructive defaults for
 questions and emit a `BLOCKED:` report when no safe default exists.
 Review criteria are single-sourced in `criteria/review-criteria.md` — edit
-there and run `./sync-criteria.sh`; never edit the three carrier copies.
+there and run `python install.py sync`; never edit the three carrier copies.
 Plan-mode notes: the coordinators now carry `ask_user`, so decision batches
 render as native question boxes (one batched ballot with defaults) instead
 of text ballots — the tools allowlist is exclusive, and earlier versions
@@ -81,7 +81,7 @@ decomposition on its own.
 
 ## Hook layer
 
-`install-copilot.sh` writes `~/.copilot/hooks/agentmaster.json` (its own
+`install.py` writes `~/.copilot/hooks/agentmaster.json` (its own
 file — hook files combine additively, so yours are never edited) wiring
 four scripts from `~/.copilot/agentmaster-hooks/`: dispatch telemetry on
 `preToolUse`/`postToolUse` (self-filtered to the `agent` tool; wall-clock

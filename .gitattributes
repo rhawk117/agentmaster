@@ -1,0 +1,4 @@
+# Shell scripts must stay LF: they run under WSL/Linux even from Windows checkouts
+*.sh text eol=lf
+# Makefile must stay LF: recipe parsing breaks if tabs/newlines become CRLF
+Makefile text eol=lf

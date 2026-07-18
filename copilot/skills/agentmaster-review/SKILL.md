@@ -9,7 +9,7 @@ code-analyst workers for all evidence.
 
 Invoke the `agentmaster-review` custom agent now, passing the diff range or
 scope verbatim. Do not review inline in this session. If the custom agent is
-not available, tell the user to run `install-copilot.sh` from the
+not available, tell the user to run `python install.py install --target copilot` from the
 agentmaster bundle.
 
 Scope under review: $ARGUMENTS
