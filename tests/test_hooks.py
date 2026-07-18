@@ -53,6 +53,32 @@ def test_telemetry_row_carries_phase_and_model(tmp_path, run_hook):
     assert line.startswith('execute,scout,claude-haiku-4-5,15,')
 
 
+def test_telemetry_finds_transcript_in_session_dir(tmp_path, run_hook):
+    # Live CLI layout: <dir>/<session>.jsonl with <dir>/<session>/subagents/.
+    am = tmp_path / '.agentmaster'
+    (am / '.starts').mkdir(parents=True)
+    (am / '.starts' / 'abc').write_text(str(time.time() - 1))
+    session_dir = tmp_path / 'projects' / 'session-1'
+    (session_dir / 'subagents').mkdir(parents=True)
+    entry = {
+        'message': {
+            'model': 'claude-haiku-4-5',
+            'usage': {'input_tokens': 7, 'output_tokens': 3},
+        }
+    }
+    (session_dir / 'subagents' / 'agent-abc.jsonl').write_text(json.dumps(entry) + '\n')
+    payload = {
+        'cwd': str(tmp_path),
+        'agent_type': 'scout',
+        'agent_id': 'abc',
+        'transcript_path': str(tmp_path / 'projects' / 'session-1.jsonl'),
+    }
+    result = run_hook('telemetry', payload)
+    assert result.returncode == 0
+    line = (am / 'telemetry.md').read_text()
+    assert line.startswith('hook,scout,claude-haiku-4-5,10,')
+
+
 def test_subagent_start_records_timestamp(tmp_path, run_hook):
     payload = {'cwd': str(tmp_path), 'agent_id': 'xyz'}
     result = run_hook('subagent_start', payload)

@@ -12,8 +12,12 @@ def _transcript_stats(transcript_path: str, aid: str) -> tuple[str | int, str]:
     """Sum input/output tokens and find the model from the subagent transcript."""
     if not (aid and transcript_path):
         return '', ''
-    base = Path(transcript_path).parent
-    cands = [base / 'subagents' / f'agent-{aid}.jsonl', base / f'agent-{aid}.jsonl']
+    base = Path(transcript_path)
+    cands = [
+        base.with_suffix('') / 'subagents' / f'agent-{aid}.jsonl',
+        base.parent / 'subagents' / f'agent-{aid}.jsonl',
+        base.parent / f'agent-{aid}.jsonl',
+    ]
     for c in cands:
         with contextlib.suppress(Exception):
             tot = 0
