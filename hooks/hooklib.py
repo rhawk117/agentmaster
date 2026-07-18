@@ -3,25 +3,9 @@
 import contextlib
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any
-
-SAFE_GIT_SUBCOMMANDS = frozenset({
-    'status',
-    'diff',
-    'log',
-    'show',
-    'blame',
-    'rev-parse',
-    'ls-files',
-    'grep',
-    'describe',
-    'shortlog',
-})
-
-_GIT_SUBCOMMAND_RE = re.compile(r'\bgit\s+(?:-\S+\s+)*([a-z-]+)')
 
 
 def read_payload() -> dict[str, Any]:
@@ -79,11 +63,3 @@ def tool_args(payload: dict[str, Any]) -> dict[str, Any]:
         or payload.get('tool_input')
         or {}
     )
-
-
-def first_blocked_git_subcommand(command: str) -> str | None:
-    """Return the first git subcommand in command that is not read-only."""
-    for m in _GIT_SUBCOMMAND_RE.finditer(command):
-        if m.group(1) not in SAFE_GIT_SUBCOMMANDS:
-            return m.group(1)
-    return None

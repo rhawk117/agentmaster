@@ -24,8 +24,8 @@ python install.py uninstall --target all   # clean removal, hook entries strippe
 
 Python 3.14+ is the only requirement — the installer is stdlib-only, so there
 are no dependencies to install. Explicit flags always win; when a flag is
-absent and the session is a TTY the installer prompts for the model and
-git-guard choices, and a non-TTY session takes the defaults silently
+absent and the session is a TTY the installer prompts for the model
+choice, and a non-TTY session takes the defaults silently
 (`--model` overrides the model pin either way). Every file it would overwrite
 is copied first into a timestamped `agentmaster-backup-<timestamp>/` under the
 config home, and the five hook events it merges into `settings.json` are
@@ -117,7 +117,7 @@ always an explicit choice.
 
 ## Claude Code hook layer
 
-Six lifecycle hooks convert protocol into mechanism, unique to Claude Code.
+Five lifecycle hooks convert protocol into mechanism, unique to Claude Code.
 The hooks are Python scripts installed to `~/.claude/agentmaster/hooks/` and
 registered idempotently in `~/.claude/settings.json` (your existing hooks are
 never touched): `SubagentStart`/`SubagentStop` (roster-scoped) measure every
@@ -126,10 +126,8 @@ longer depends on the orchestrator remembering; a `PreToolUse` guard on the
 `Agent`/`Task` tools blocks all dispatch while `CLAUDE_CODE_SUBAGENT_MODEL`
 is exported, since that variable silently defeats the tiering; `PreCompact`
 snapshots `.agentmaster/` into `.agentmaster/compaction-snapshots/` before
-compaction; `SessionStart` injects a re-hydration pointer whenever a project
-carries agentmaster artifacts; and the implementer carries a frontmatter
-`git-guard` (default-deny on git subcommands with a read-only allowlist —
-the operator owns git, enforced only while an implementer runs). All scripts
+compaction; and `SessionStart` injects a re-hydration pointer whenever a
+project carries agentmaster artifacts. All scripts
 parse hook JSON permissively across CLI versions; `AGENTMASTER_HOOK_DEBUG=1`
 dumps raw payloads to `.agentmaster/hook-debug.jsonl` for one-run
 verification.

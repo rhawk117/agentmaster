@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from installer.actions import InstallReport
 
 _MODEL_SKILLS = frozenset({'agentmaster-plan', 'agentmaster-review'})
-_GIT_GUARD_SOURCE = 'python3 "$HOME/.claude/agentmaster/hooks/git_guard.py"'
 _ROSTER = '^(scout|code-analyst|plan-critic|implementer|Explore)$'
 
 
@@ -80,12 +79,9 @@ def _skill_plans(
 
 
 def _agent_plans(root: Path, home: Path, manifest: Manifest) -> list[FilePlan]:
-    interpreter = _interpreter()
-    rewritten = f'"{interpreter}" "{home.as_posix()}/agentmaster/hooks/git_guard.py"'
     plans: list[FilePlan] = []
     for worker in manifest.workers:
         text = render_worker(worker, 'claude', manifest, root)
-        text = text.replace(_GIT_GUARD_SOURCE, rewritten)
         plans.append(FilePlan(content=text, destination=home / 'agents' / f'{worker}.md'))
     for agent in manifest.claude_only_agents:
         content = (root / 'agents' / f'{agent}.md').read_text(encoding='utf-8')

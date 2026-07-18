@@ -49,19 +49,6 @@ def test_append_telemetry_blank_defaults(tmp_path):
     assert line == 'hook,precompact,,,\n'
 
 
-def test_first_blocked_git_subcommand_push():
-    assert hooklib.first_blocked_git_subcommand('git status && git push') == 'push'
-
-
-def test_first_blocked_git_subcommand_safe_with_flag():
-    # A leading flag is skipped and the safe subcommand is captured.
-    assert hooklib.first_blocked_git_subcommand('git --no-pager log') is None
-
-
-def test_first_blocked_git_subcommand_all_safe():
-    assert hooklib.first_blocked_git_subcommand('git status && git diff') is None
-
-
 def test_tool_name_camel_and_snake():
     assert hooklib.tool_name({'toolName': 'Bash'}) == 'bash'
     assert hooklib.tool_name({'tool_name': 'Shell'}) == 'shell'

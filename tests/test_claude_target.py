@@ -1,7 +1,6 @@
 """Tests for the Claude Code install target of the Python installer."""
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -48,7 +47,6 @@ def test_fresh_install_writes_everything(tmp_path: Path, repo_root, statuses) ->
 
     hooks = (
         'dispatch_guard.py',
-        'git_guard.py',
         'hooklib.py',
         'precompact_snapshot.py',
         'session_context.py',
@@ -84,19 +82,13 @@ def test_model_pin_only_in_plan_and_review(tmp_path: Path, repo_root) -> None:
     assert pin not in execute
 
 
-def test_scout_verbatim_implementer_rewritten(tmp_path: Path, repo_root) -> None:
+def test_workers_installed_verbatim(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
     install(repo_root, home, model='opus', dry_run=False)
 
-    scout = (home / 'agents' / 'scout.md').read_text(encoding='utf-8')
-    assert scout == render_worker('scout', 'claude')
-
-    implementer = (home / 'agents' / 'implementer.md').read_text(encoding='utf-8')
-    interpreter = Path(sys.executable).as_posix()
-    home_posix = home.resolve().as_posix()
-    assert interpreter in implementer
-    assert f'"{interpreter}" "{home_posix}/agentmaster/hooks/git_guard.py"' in implementer
-    assert 'python3 "$HOME/.claude/agentmaster/hooks/git_guard.py"' not in implementer
+    for worker in ('scout', 'implementer'):
+        text = (home / 'agents' / f'{worker}.md').read_text(encoding='utf-8')
+        assert text == render_worker(worker, 'claude')
 
 
 def test_second_install_is_idempotent(tmp_path: Path, repo_root, statuses) -> None:

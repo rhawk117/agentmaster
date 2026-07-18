@@ -34,7 +34,7 @@ def test_fresh_install_creates_everything(tmp_path: Path, repo_root, statuses) -
     for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
         assert (home / 'skills' / skill / 'SKILL.md').is_file()
     hooks = sorted(p.name for p in (home / 'agentmaster-hooks').iterdir())
-    assert len(hooks) == 5
+    assert len(hooks) == 4
     for hook in (home / 'agentmaster-hooks').iterdir():
         assert hook.stat().st_mode & 0o111
 
@@ -53,26 +53,6 @@ def test_coordinators_repinned_workers_keep_pins(tmp_path: Path, repo_root) -> N
         assert 'model: opus-test\n' in text
     scout = (home / 'agents' / 'scout.agent.md').read_text(encoding='utf-8')
     assert 'model: claude-haiku-4.5\n' in scout
-
-
-def test_git_guard_enabled_by_default(tmp_path: Path, repo_root) -> None:
-    home = tmp_path / 'copilot-home'
-
-    install(repo_root, home, model='opus-test', dry_run=False)
-
-    commands = _hook_commands(home / 'hooks' / 'agentmaster.json')
-    assert any('git_guard.py' in command for command in commands)
-
-
-def test_git_guard_disabled_omits_entry(tmp_path: Path, repo_root) -> None:
-    home = tmp_path / 'copilot-home'
-
-    install(repo_root, home, model='opus-test', dry_run=False, git_guard=False)
-
-    config = json.loads((home / 'hooks' / 'agentmaster.json').read_text(encoding='utf-8'))
-    assert len(config['hooks']['preToolUse']) == 1
-    commands = _hook_commands(home / 'hooks' / 'agentmaster.json')
-    assert not any('git_guard.py' in command for command in commands)
 
 
 def test_idempotent_rerun_creates_nothing(tmp_path: Path, repo_root, statuses) -> None:

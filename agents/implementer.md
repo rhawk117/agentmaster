@@ -6,12 +6,6 @@ model: sonnet
 maxTurns: 50
 color: green
 # isolation: worktree  # uncomment to give each implementer an isolated git worktree instead of relying on disjoint file ownership
-hooks:
-  PreToolUse:
-    - matcher: 'Bash'
-      hooks:
-        - type: command
-          command: 'python3 "$HOME/.claude/agentmaster/hooks/git_guard.py"'
 ---
 
 <!-- generated from shared/agents/implementer.md — edit there and run: python install.py sync -->
