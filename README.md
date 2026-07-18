@@ -111,6 +111,25 @@ than a day (`--keep-lines`, `--keep-snapshots`, and `--dry-run` adjust that).
 Nothing prunes automatically — the hooks only ever append, so pruning is
 always an explicit choice.
 
+## Claude Code hook layer
+
+Six lifecycle hooks convert protocol into mechanism, unique to Claude Code.
+The hooks are Python scripts installed to `~/.claude/agentmaster/hooks/` and
+registered idempotently in `~/.claude/settings.json` (your existing hooks are
+never touched): `SubagentStart`/`SubagentStop` (roster-scoped) measure every
+worker dispatch into the telemetry file described above, so telemetry no
+longer depends on the orchestrator remembering; a `PreToolUse` guard on the
+`Agent`/`Task` tools blocks all dispatch while `CLAUDE_CODE_SUBAGENT_MODEL`
+is exported, since that variable silently defeats the tiering; `PreCompact`
+snapshots `.agentmaster/` into `.agentmaster/compaction-snapshots/` before
+compaction; `SessionStart` injects a re-hydration pointer whenever a project
+carries agentmaster artifacts; and the implementer carries a frontmatter
+`git-guard` (default-deny on git subcommands with a read-only allowlist —
+the operator owns git, enforced only while an implementer runs). All scripts
+parse hook JSON permissively across CLI versions; `AGENTMASTER_HOOK_DEBUG=1`
+dumps raw payloads to `.agentmaster/hook-debug.jsonl` for one-run
+verification.
+
 ## Development
 
 One command verifies the repository, and CI runs exactly it:
