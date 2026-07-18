@@ -107,3 +107,8 @@ def test_injected_manifest_overrides_default(tmp_path):
     implementer_out = (tmp_path / 'agents' / 'implementer.md').read_text(encoding='utf-8')
     assert 'FAKE RULE.' in implementer_out
     assert 'MANIFEST' not in implementer_out
+
+
+def test_manifest_hook_files_exist():
+    for name in (*MANIFEST.claude_hooks, *MANIFEST.copilot_hooks):
+        assert (REPO_ROOT / 'hooks' / name).is_file(), name
