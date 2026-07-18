@@ -69,12 +69,16 @@ SpotBugs, …).
 bash install-claude.sh
 ```
 
-The installer checks for superpowers (offering to install it), asks which
-frontier model plan and review should run, installs the three skills and
-five agents with backups, removes legacy `delegated-*` names on request, and
-wires the hook layer: hook scripts to `~/.claude/agentmaster/hooks/` plus an
-idempotent merge of five events into `~/.claude/settings.json` that never
-touches your existing hooks (a timestamped backup is taken anyway). Manual
+`install-claude.sh` is a thin wrapper over the cross-platform Python
+installer (Python 3.14+; equivalently: `python install.py install --target
+claude`). It checks for superpowers (printing the install commands when
+missing), asks which frontier model plan and review should run (or takes
+`--model`; `--dry-run` previews), installs the three skills and five agents
+with backups, and wires the hook layer: Python hook scripts to
+`~/.claude/agentmaster/hooks/` plus an idempotent merge of five events into
+`~/.claude/settings.json` that never touches your existing hooks (a
+timestamped backup is taken anyway). Migrating from the pre-rebrand
+`delegated-*` skills? Remove those directories manually as below. Manual
 install remains:
 
 ```bash
@@ -96,11 +100,12 @@ exploration on haiku.
 bash install-copilot.sh
 ```
 
-The installer checks for the superpowers plugin (and offers to install it),
-asks which frontier model the coordinators should run (default Opus 4.8),
-backs up existing agents, installs all seven, and offers to remove legacy
-`delegated-*` files from a pre-rebrand install. Platform specifics live in
-`copilot/README.md`.
+`install-copilot.sh` wraps the same Python installer (`python install.py
+install --target copilot`). It checks for the superpowers plugin (printing
+the install commands when missing), asks which frontier model the
+coordinators should run (default Opus 4.8; or `--model`), backs up existing
+agents, and installs all seven plus the hook layer. Platform specifics live
+in `copilot/README.md`.
 
 ## Models and cost
 
@@ -192,7 +197,21 @@ gap parallel mode leaves; a proportionality gate (and `--lite`) keeps the
 recommending no pipeline at all for trivial changes; serialized
 verifications batch into one dispatch; telemetry follows a fixed
 `phase,agent,model,tokens,duration_ms` schema summarized by
-`./telemetry-report.sh`; and `./sync-criteria.sh --check` fails CI on
-criteria drift.
+`scripts/telemetry-report.sh`; and `python install.py validate --target all`
+(wrapped by `scripts/sync-criteria.sh --check`) fails CI on criteria or
+generated-file drift.
+
+## Development
+
+One command verifies the repository — CI runs exactly the same gate:
+
+```bash
+bash scripts/code-quality.sh all   # ruff format+check, bashate, ty, pytest, parity validation
+```
+
+Worker agent prompts are generated: edit `shared/agents/<name>.md` and run
+`python install.py sync`; `validate` fails on any undeclared drift between
+the shared sources and the committed Claude/Copilot copies. Requires Python
+3.14+ and [uv](https://docs.astral.sh/uv/).
 
 
