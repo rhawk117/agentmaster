@@ -230,3 +230,25 @@ def test_preflight_missing_source_raises_and_writes_nothing(tmp_path: Path) -> N
         install(root, home, model='opus', dry_run=False, manifest=manifest)
 
     assert not home.exists()
+
+
+def test_install_fails_closed_on_malformed_settings(tmp_path):
+    home = tmp_path / 'claude-home'
+    home.mkdir()
+    (home / 'settings.json').write_text('[]\n')
+
+    with pytest.raises(ValueError, match=r'settings\.json'):
+        install(ROOT, home, model='opus', dry_run=False)
+
+    assert not (home / 'skills').exists()
+
+
+def test_install_fails_closed_on_non_object_hooks(tmp_path):
+    home = tmp_path / 'claude-home'
+    home.mkdir()
+    (home / 'settings.json').write_text('{"hooks": []}\n')
+
+    with pytest.raises(ValueError, match='hooks'):
+        install(ROOT, home, model='opus', dry_run=False)
+
+    assert not (home / 'skills').exists()

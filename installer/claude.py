@@ -106,9 +106,33 @@ def _hook_plans(root: Path, home: Path, manifest: Manifest) -> list[FilePlan]:
 
 
 def _is_ours(entry: dict) -> bool:
+    if not isinstance(entry, dict):
+        return False
     return any(
-        'agentmaster/hooks' in hook.get('command', '') for hook in entry.get('hooks', [])
+        isinstance(hook, dict) and 'agentmaster/hooks' in hook.get('command', '')
+        for hook in entry.get('hooks', [])
     )
+
+
+def _load_settings(settings_path: Path) -> dict:
+    """Parse and shape-check settings.json, failing closed on malformed content."""
+    try:
+        settings = json.loads(settings_path.read_text(encoding='utf-8'))
+    except ValueError as error:
+        msg = f'{settings_path} is not valid JSON: {error}'
+        raise ValueError(msg) from error
+    if not isinstance(settings, dict):
+        msg = f'{settings_path}: settings.json must contain a JSON object'
+        raise ValueError(msg)  # noqa: TRY004 -- file content, not a type bug
+    hooks = settings.get('hooks', {})
+    if not isinstance(hooks, dict):
+        msg = f'{settings_path}: "hooks" must be a JSON object'
+        raise ValueError(msg)  # noqa: TRY004 -- file content, not a type bug
+    for event, entries in hooks.items():
+        if not isinstance(entries, list):
+            msg = f'{settings_path}: hooks[{event!r}] must be a JSON array'
+            raise ValueError(msg)  # noqa: TRY004 -- file content, not a type bug
+    return settings
 
 
 def _hook_events(home: Path) -> dict[str, list[dict]]:
@@ -134,7 +158,7 @@ def _merge_settings(home: Path) -> None:
     if settings_path.exists():
         backup = home / f'settings.json.agentmaster-backup-{int(time.time())}'
         shutil.copy2(settings_path, backup)
-        settings = json.loads(settings_path.read_text(encoding='utf-8'))
+        settings = _load_settings(settings_path)
     else:
         settings = {}
     hooks = settings.setdefault('hooks', {})
@@ -149,10 +173,8 @@ def _strip_settings(home: Path) -> None:
     settings_path = home / 'settings.json'
     if not settings_path.exists():
         return
-    settings = json.loads(settings_path.read_text(encoding='utf-8'))
-    hooks = settings.get('hooks')
-    if not isinstance(hooks, dict):
-        return
+    settings = _load_settings(settings_path)
+    hooks = settings.get('hooks', {})
     for entries in hooks.values():
         entries[:] = [entry for entry in entries if not _is_ours(entry)]
     settings_path.write_text(json.dumps(settings, indent=2) + '\n', encoding='utf-8')
@@ -169,6 +191,9 @@ def install(
     """Install skills, workers, and the hook layer into a Claude config home."""
     home = home.resolve()
     _preflight(root, manifest)
+    settings_path = home / 'settings.json'
+    if settings_path.exists():
+        _load_settings(settings_path)  # fail closed before any file is written
     plans = [
         *_skill_plans(root, home, model, manifest),
         *_agent_plans(root, home, manifest),
