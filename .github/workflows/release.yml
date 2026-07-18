@@ -1,0 +1,39 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.14'
+      - name: Verify tag matches pyproject version
+        run: |
+          version=$(uv run python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$version" ]; then
+            echo "tag v$tag does not match pyproject version $version" >&2
+            exit 1
+          fi
+      - run: uv sync
+      - name: Quality gate
+        run: bash scripts/code-quality.sh all
+      - name: Build install bundle
+        run: |
+          git archive --format=zip -o "agentmaster-$GITHUB_REF_NAME.zip" HEAD \
+            install.py installer shared agents copilot skills hooks criteria \
+            scripts/telemetry_report.py README.md LICENSE pyproject.toml
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "agentmaster-$GITHUB_REF_NAME.zip" \
+            --generate-notes --verify-tag
