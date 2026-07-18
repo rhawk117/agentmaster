@@ -1,0 +1,14 @@
+[project]
+name = "agentmaster"
+version = "0.1.0"
+description = "On strong head with weaker hands"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "bashate>=2.1.1",
+    "ruff>=0.15.22",
+    "ty>=0.0.61",
+]
