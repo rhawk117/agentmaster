@@ -143,7 +143,51 @@ def test_malformed_json_exits_zero_everywhere(tmp_path):
         'session_context',
         'git_guard',
         'dispatch_guard',
+        'copilot_telemetry_pre',
+        'copilot_telemetry_post',
     )
     for name in hooks:
         result = _run(name, None, tmp_path, raw='not json')
         assert result.returncode == 0, (name, result.stderr)
+
+
+def test_copilot_pre_queues_agent(tmp_path):
+    payload = {'cwd': str(tmp_path), 'toolName': 'agent', 'toolArgs': {'agent': 'scout'}}
+    result = _run('copilot_telemetry_pre', payload, tmp_path)
+    assert result.returncode == 0
+    queue = tmp_path / '.agentmaster' / '.starts' / 'copilot-queue'
+    ts, agent = queue.read_text().strip().split(' ', 1)
+    assert agent == 'scout'
+    assert float(ts) > 0
+
+
+def test_copilot_pre_ignores_other_tools(tmp_path):
+    payload = {'cwd': str(tmp_path), 'toolName': 'execute', 'toolArgs': {'command': 'x'}}
+    result = _run('copilot_telemetry_pre', payload, tmp_path)
+    assert result.returncode == 0
+    assert not (tmp_path / '.agentmaster' / '.starts' / 'copilot-queue').exists()
+
+
+def test_copilot_post_pops_fifo(tmp_path):
+    starts = tmp_path / '.agentmaster' / '.starts'
+    starts.mkdir(parents=True)
+    (starts / 'copilot-queue').write_text(
+        f'{time.time() - 1} scout\n{time.time()} planner\n'
+    )
+    payload = {'cwd': str(tmp_path), 'toolName': 'agent', 'toolArgs': {}}
+    result = _run('copilot_telemetry_post', payload, tmp_path)
+    assert result.returncode == 0
+    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    assert line.startswith('hook,scout,,,')
+    assert line.endswith('\n')
+    remaining = (starts / 'copilot-queue').read_text()
+    assert 'planner' in remaining
+    assert 'scout' not in remaining
+
+
+def test_copilot_post_empty_queue(tmp_path):
+    payload = {'cwd': str(tmp_path), 'toolName': 'agent', 'toolArgs': {}}
+    result = _run('copilot_telemetry_post', payload, tmp_path)
+    assert result.returncode == 0
+    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    assert line == 'hook,agent,,,\n'
