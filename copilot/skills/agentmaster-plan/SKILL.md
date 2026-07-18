@@ -11,6 +11,6 @@ Invoke the `agentmaster-plan` custom agent now, passing the user's task and
 any `--lite` or `--headless` flags verbatim. Do not run the pipeline inline
 in this session — the cost boundary depends on the coordinator's restricted
 toolset. If the custom agent is not available, tell the user to run
-`install-copilot.sh` from the agentmaster bundle.
+`python install.py install --target copilot` from the agentmaster bundle.
 
 Task: $ARGUMENTS

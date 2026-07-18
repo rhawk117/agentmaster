@@ -10,6 +10,6 @@ this session.
 Invoke the `agentmaster-execute` custom agent now, passing the plan path or
 scope and any `--headless` flag verbatim. Do not implement the plan inline.
 If the custom agent is not available, tell the user to run
-`install-copilot.sh` from the agentmaster bundle.
+`python install.py install --target copilot` from the agentmaster bundle.
 
 Plan: $ARGUMENTS
