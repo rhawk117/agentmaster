@@ -22,7 +22,9 @@ the 40-line limit. Everything around the diff is normal delegated evidence.
 ## Phase 1 — Scope
 
 Dispatch a scout to resolve the change set — the range the user gave, or the
-working tree plus commits against the merge-base with the default branch. It
+working tree plus commits against the merge-base with the default branch.
+That scout first runs `printf 'review\n' > .agentmaster/.phase`: the marker
+stamps every telemetry row with this phase. It
 returns `git diff --stat`, the changed-file list, and the diff. Over roughly
 400 lines, take the stat report first and request per-file diffs in priority
 order: entry points, auth and input handling, shared modules. If a plan
@@ -97,7 +99,10 @@ looping again.
 ## Output
 
 Return the review report only: verdict, adjudicated findings with severity,
-category, evidence, and your ruling on each, fix rounds run, open items, and a cost appendix (every dispatch, its agent
-and model, appended as `phase,agent,model,tokens,duration_ms` lines to `.agentmaster/telemetry.md` via a scout; check
-`/usage` for premium-request spend). Do not edit files yourself at any
+category, evidence, and your ruling on each, fix rounds run, open items, and
+a cost appendix (every dispatch, its agent and model; telemetry rows are
+recorded automatically by the hook layer, stamped with the phase named in
+`.agentmaster/.phase` — do not append rows yourself; check `/usage` for
+premium-request spend). Your final scout dispatch clears
+`.agentmaster/.phase` (writes it empty). Do not edit files yourself at any
 point.

@@ -49,6 +49,26 @@ def test_append_telemetry_blank_defaults(tmp_path):
     assert line == 'hook,precompact,,,\n'
 
 
+def test_append_telemetry_stamps_active_phase(tmp_path):
+    payload = {'cwd': str(tmp_path)}
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / '.phase').write_text('review\n')
+    hooklib.append_telemetry(payload, 'scout', 1, 2, 'sonnet')
+    line = (am / 'telemetry.md').read_text()
+    assert line == 'review,scout,sonnet,1,2\n'
+
+
+def test_current_phase_reads_strips_and_degrades(tmp_path):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / '.phase').write_text('plan\n')
+    assert hooklib.current_phase(am) == 'plan'
+    (am / '.phase').write_text('')
+    assert hooklib.current_phase(am) == ''
+    assert hooklib.current_phase(tmp_path / 'missing') == ''
+
+
 def test_tool_name_camel_and_snake():
     assert hooklib.tool_name({'toolName': 'Bash'}) == 'bash'
     assert hooklib.tool_name({'tool_name': 'Shell'}) == 'shell'

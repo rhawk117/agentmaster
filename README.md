@@ -105,15 +105,20 @@ values are the runaway-spend caps — tune per repo size.
 
 ## Telemetry
 
-The hook layer appends `hook,<agent>,,<tokens>,<duration_ms>` rows to
-`.agentmaster/telemetry.md` — tokens from the payload where the platform
-reports them, wall-clock duration from a start/stop timestamp pair. Read the
-running totals with `make telemetry` (or `uv run python
-scripts/telemetry_report.py`). Prune with `make clean-telemetry`: it keeps the
-newest 500 lines and 5 compaction snapshots and drops `.starts` orphans older
-than a day (`--keep-lines`, `--keep-snapshots`, and `--dry-run` adjust that).
-Nothing prunes automatically — the hooks only ever append, so pruning is
-always an explicit choice.
+The hook layer owns all telemetry rows: it appends
+`<phase>,<agent>,<model>,<tokens>,<duration_ms>` lines to
+`.agentmaster/telemetry.md` — the phase from the `.agentmaster/.phase`
+marker the coordinator skills set and clear at phase boundaries (`hook` when
+none is active), the model and tokens from the payload or the subagent
+transcript where the platform reports them, wall-clock duration from a
+start/stop timestamp pair. The skills never hand-append rows. Read the
+running totals per agent, phase, and model with `make telemetry` (or `uv run
+python scripts/telemetry_report.py`). Prune with `make clean-telemetry`: it
+keeps the newest 500 lines and 5 compaction snapshots and drops `.starts`
+orphans and a stale `.phase` marker older than a day (`--keep-lines`,
+`--keep-snapshots`, and `--dry-run` adjust that). Nothing prunes
+automatically — the hooks only ever append, so pruning is always an explicit
+choice.
 
 ## Claude Code hook layer
 
@@ -173,11 +178,14 @@ re-tag.
 ## Hardening: how each former weakness is now addressed
 
 1. Prose-only cost boundary (Claude Code) → default-on `PreToolUse` hooks in
-   all three skills block Read/Grep/Glob/Bash/Web/Edit/Write in the main
-   thread with a delegation reminder (execute keeps Read for the plan file).
-   Residual: Claude Code prompts once to approve skills that define hooks,
-   and hook lifetime past the phase should be spot-checked per CLI version —
-   the failure direction is over-blocking, which is safe.
+   all three skills run `cost_boundary.py`, which blocks
+   Read/Grep/Glob/Bash/Web/Edit/Write in the main thread with a delegation
+   reminder (execute keeps Read for the plan file). The hook is armed only
+   while `.agentmaster/.phase` names a phase — the skills set the marker at
+   phase start and clear it at phase end, so the boundary cannot outlive its
+   phase — and paths outside the workspace (the plan-mode plan file, the
+   session scratchpad) and under `.agentmaster/` stay writable. Residual:
+   Claude Code prompts once to approve skills that define hooks.
 2. Elevation-lifetime ambiguity → every phase ends with an explicit phase
    boundary: it reminds you the session may still be elevated (`/model` to
    check, fresh session to drop) and refuses to roll into the next phase in
@@ -207,9 +215,10 @@ re-tag.
    hand back to `agentmaster-execute` — the artifact defends itself even
    when the menu is mis-clicked. Residual: a worker that ignores its input
    entirely isn't stopped by anything but the docs.
-9. No cost telemetry → every phase closes with a cost appendix (each
-   dispatch, agent, model, and tokens/duration where the platform reports
-   them) appended to `.agentmaster/telemetry.md`; tuning `maxTurns` and
+9. No cost telemetry → the hook layer records every worker dispatch to
+   `.agentmaster/telemetry.md` automatically, stamped with the active phase
+   and the worker's model; every phase still closes with a human-readable
+   cost appendix, but no phase hand-appends rows. Tuning `maxTurns` and
    model pins is done from that file, not by feel. Residual: Copilot
    reports per-request multipliers via `/usage`, not per-subagent tokens.
 10. No evals → `evals/evals.json` ships five cross-stack cases (JS/TS plan,

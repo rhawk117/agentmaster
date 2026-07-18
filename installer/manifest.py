@@ -118,6 +118,7 @@ MANIFEST = Manifest(
     ),
     claude_only_agents=('explore',),
     claude_hooks=(
+        'cost_boundary.py',
         'dispatch_guard.py',
         'hooklib.py',
         'precompact_snapshot.py',

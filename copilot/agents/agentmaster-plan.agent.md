@@ -36,6 +36,11 @@ Dispatch independent questions in parallel where the platform allows. Ask the
 user directly in the conversation when requirements are ambiguous — a
 clarifying question is free; a worker dispatched at the wrong target is not.
 
+Phase marker: your first scout dispatch of this phase also runs
+`printf 'plan\n' > .agentmaster/.phase` before its question — the marker
+stamps every telemetry row with the phase. Skip it when workspace writes are
+blocked (plan mode).
+
 ## Phase 1 — Frame
 
 Restate the goal in one paragraph: what must be observably true when the
@@ -147,5 +152,7 @@ mode, then run the `agentmaster-execute` agent — it dispatches one
 loop; implementation is not done until its verdict is
 in. Keep orchestration commentary brief — narrate decisions, not tool
 mechanics. Close with a cost appendix — every dispatch, its agent and
-model — appended as `phase,agent,model,tokens,duration_ms` lines to `.agentmaster/telemetry.md` via a scout; check `/usage`
-for the premium-request spend this phase.
+model. Telemetry rows are recorded automatically by the hook layer, stamped
+with the phase named in `.agentmaster/.phase`; do not append rows yourself.
+Your final scout dispatch clears `.agentmaster/.phase` (writes it empty);
+check `/usage` for the premium-request spend this phase.

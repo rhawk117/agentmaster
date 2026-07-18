@@ -85,9 +85,11 @@ decomposition on its own.
 file — hook files combine additively, so yours are never edited) wiring
 three scripts from `~/.copilot/agentmaster-hooks/`: dispatch telemetry on
 `preToolUse`/`postToolUse` (self-filtered to the `agent` tool; wall-clock
-per dispatch into `.agentmaster/telemetry.md` — Copilot hooks carry no token
-counts, so spend stays with `/usage`), and a `sessionStart` pointer to
-`.agentmaster/` artifacts. Headless note: `copilot -p` disables repository-level hooks by
+per dispatch into `.agentmaster/telemetry.md`, rows stamped with the phase
+named in `.agentmaster/.phase` — Copilot hooks carry no token counts, so
+spend stays with `/usage`), and a `sessionStart` pointer to `.agentmaster/`
+artifacts. The coordinators have their first scout write the phase marker
+and their last scout clear it. Headless note: `copilot -p` disables repository-level hooks by
 default (`GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS=true` opts in); the layer
 installs user-level partly for this reason. `AGENTMASTER_HOOK_DEBUG=1`
 dumps payloads to `.agentmaster/hook-debug.jsonl`.

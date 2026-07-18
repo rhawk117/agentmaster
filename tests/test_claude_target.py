@@ -1,6 +1,7 @@
 """Tests for the Claude Code install target of the Python installer."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,19 @@ def test_workers_installed_verbatim(tmp_path: Path, repo_root) -> None:
     for worker in ('scout', 'implementer'):
         text = (home / 'agents' / f'{worker}.md').read_text(encoding='utf-8')
         assert text == render_worker(worker, 'claude')
+
+
+def test_cost_boundary_rewritten_in_skills(tmp_path: Path, repo_root) -> None:
+    home = tmp_path / 'claude-home'
+    install(repo_root, home, model='opus', dry_run=False)
+
+    interpreter = Path(sys.executable).as_posix()
+    home_posix = home.resolve().as_posix()
+    rewritten = f'"{interpreter}" "{home_posix}/agentmaster/hooks/cost_boundary.py"'
+    for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
+        text = (home / 'skills' / skill / 'SKILL.md').read_text(encoding='utf-8')
+        assert rewritten in text
+        assert 'python3 "$HOME/.claude/agentmaster/hooks/cost_boundary.py"' not in text
 
 
 def test_second_install_is_idempotent(tmp_path: Path, repo_root, statuses) -> None:

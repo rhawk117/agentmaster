@@ -9,7 +9,7 @@ hooks:
     - matcher: "Grep|Glob|Bash|WebFetch|WebSearch|Edit|Write|NotebookEdit"
       hooks:
         - type: command
-          command: "echo 'agentmaster cost boundary: this phase never touches the repository directly - delegate to scout or code-analyst' >&2; exit 2"
+          command: 'python3 "$HOME/.claude/agentmaster/hooks/cost_boundary.py"'
 ---
 
 # Agentmaster Execute
@@ -23,6 +23,11 @@ Plan to execute: $ARGUMENTS (default: the most recent plan produced by
 agentmaster-plan in this project)
 
 ## Phase 1 — Load and gate
+
+First write the single word `execute` to `.agentmaster/.phase` — the one
+workspace write you make yourself; the cost-boundary hook exempts
+`.agentmaster/`. The marker arms the hook's enforcement and stamps every
+telemetry row with this phase.
 
 Read the plan file. This is the one direct read you make; it is your working
 document. Confirm the plan carries what safe dispatch requires: parallel
@@ -85,5 +90,8 @@ outcomes, gate results, deviations (there should be none), and then the
 review's verdict as delivered. Never edit files yourself, and never end
 without the review — implementation is not done until its verdict is in.
 Close with the cost appendix: every dispatch, its agent and model, tokens
-and duration where reported, appended as `phase,agent,model,tokens,duration_ms` lines to `.agentmaster/telemetry.md` via a
-scout.
+and duration where reported. Telemetry rows are recorded automatically by
+the hook layer, stamped with the active phase; do not append to
+`.agentmaster/telemetry.md`. Before returning, clear `.agentmaster/.phase`
+by overwriting it with empty content, retiring the cost boundary for this
+phase.

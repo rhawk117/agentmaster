@@ -1,5 +1,6 @@
 """Tests for the agentmaster lifecycle hook scripts."""
 
+import json
 import os
 import time
 
@@ -24,6 +25,32 @@ def test_telemetry_writes_line_and_consumes_start(tmp_path, run_hook):
     assert line.startswith('hook,scout,,42,')
     assert line.endswith('\n')
     assert not (starts / 'abc').exists()
+
+
+def test_telemetry_row_carries_phase_and_model(tmp_path, run_hook):
+    am = tmp_path / '.agentmaster'
+    (am / '.starts').mkdir(parents=True)
+    (am / '.phase').write_text('execute\n')
+    (am / '.starts' / 'abc').write_text(str(time.time() - 1))
+    session = tmp_path / 'session'
+    (session / 'subagents').mkdir(parents=True)
+    entry = {
+        'message': {
+            'model': 'claude-haiku-4-5',
+            'usage': {'input_tokens': 10, 'output_tokens': 5},
+        }
+    }
+    (session / 'subagents' / 'agent-abc.jsonl').write_text(json.dumps(entry) + '\n')
+    payload = {
+        'cwd': str(tmp_path),
+        'agent_type': 'scout',
+        'agent_id': 'abc',
+        'transcript_path': str(session / 'main.jsonl'),
+    }
+    result = run_hook('telemetry', payload)
+    assert result.returncode == 0
+    line = (am / 'telemetry.md').read_text()
+    assert line.startswith('execute,scout,claude-haiku-4-5,15,')
 
 
 def test_subagent_start_records_timestamp(tmp_path, run_hook):
@@ -64,6 +91,69 @@ def test_session_context_silent_without_artifacts(tmp_path, run_hook):
     assert result.stdout.strip() == ''
 
 
+def _arm_phase(tmp_path, phase='plan'):
+    am = tmp_path / '.agentmaster'
+    am.mkdir(exist_ok=True)
+    (am / '.phase').write_text(f'{phase}\n')
+    return am
+
+
+def test_cost_boundary_blocks_repo_write_during_phase(tmp_path, run_hook):
+    _arm_phase(tmp_path)
+    payload = {
+        'cwd': str(tmp_path),
+        'tool_name': 'Write',
+        'tool_input': {'file_path': str(tmp_path / 'src' / 'main.py')},
+    }
+    result = run_hook('cost_boundary', payload)
+    assert result.returncode == 2
+    assert 'plan phase' in result.stderr
+
+
+def test_cost_boundary_blocks_bash_during_phase(tmp_path, run_hook):
+    _arm_phase(tmp_path, 'review')
+    payload = {
+        'cwd': str(tmp_path),
+        'tool_name': 'Bash',
+        'tool_input': {'command': 'pytest'},
+    }
+    result = run_hook('cost_boundary', payload)
+    assert result.returncode == 2
+
+
+def test_cost_boundary_allows_write_outside_workspace(tmp_path, run_hook):
+    _arm_phase(tmp_path)
+    plan_file = tmp_path.parent / 'claude-plans' / 'plan.md'
+    payload = {
+        'cwd': str(tmp_path),
+        'tool_name': 'Write',
+        'tool_input': {'file_path': str(plan_file)},
+    }
+    result = run_hook('cost_boundary', payload)
+    assert result.returncode == 0
+
+
+def test_cost_boundary_allows_agentmaster_write(tmp_path, run_hook):
+    am = _arm_phase(tmp_path)
+    payload = {
+        'cwd': str(tmp_path),
+        'tool_name': 'Write',
+        'tool_input': {'file_path': str(am / '.phase')},
+    }
+    result = run_hook('cost_boundary', payload)
+    assert result.returncode == 0
+
+
+def test_cost_boundary_noop_without_marker(tmp_path, run_hook):
+    payload = {
+        'cwd': str(tmp_path),
+        'tool_name': 'Bash',
+        'tool_input': {'command': 'pytest'},
+    }
+    result = run_hook('cost_boundary', payload)
+    assert result.returncode == 0
+
+
 def test_dispatch_guard_blocks_when_env_set(run_hook):
     env = {**os.environ, 'CLAUDE_CODE_SUBAGENT_MODEL': 'haiku'}
     result = run_hook('dispatch_guard', {}, env=env)
@@ -83,6 +173,7 @@ def test_malformed_json_exits_zero_everywhere(run_hook):
         'subagent_start',
         'precompact_snapshot',
         'session_context',
+        'cost_boundary',
         'dispatch_guard',
         'copilot_telemetry_pre',
         'copilot_telemetry_post',

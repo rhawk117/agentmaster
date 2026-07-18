@@ -16,7 +16,9 @@ agentmaster-review agent.
 ## Part 1 — Load and gate
 
 Dispatch a scout to return the plan document verbatim — exempt from the
-40-line report cap, since it is your working document. Confirm it carries
+40-line report cap, since it is your working document. That scout first runs
+`printf 'execute\n' > .agentmaster/.phase`: the marker stamps every
+telemetry row with this phase. Confirm it carries
 parallel groups with disjoint file ownership, per-task verification, `Uses:`
 lines, and Open Questions. If an open question blocks execution, resolve it
 with the user before dispatching anything — through ask_user as a single
@@ -126,6 +128,8 @@ recommendation.
 
 Return the execution-and-review report only: per-group execution results,
 gate results, the verdict, adjudicated findings with severity, category,
-evidence, and ruling, fix rounds run, open items, and a cost appendix (every dispatch, its agent
-and model, appended as `phase,agent,model,tokens,duration_ms` lines to `.agentmaster/telemetry.md` via a scout). Never edit
-files yourself.
+evidence, and ruling, fix rounds run, open items, and a cost appendix (every
+dispatch, its agent and model; telemetry rows are recorded automatically by
+the hook layer, stamped with the phase named in `.agentmaster/.phase` — do
+not append rows yourself). Your final scout dispatch clears
+`.agentmaster/.phase` (writes it empty). Never edit files yourself.
