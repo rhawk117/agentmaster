@@ -1,6 +1,6 @@
 """Claude Code install target — composes skills, workers, and the hook layer.
 
-Ports the behaviour of `install-claude.sh` (lines 81-135): a completeness
+Ports the behaviour of the retired shell installer: a completeness
 preflight over the bundle sources, a single transactional `apply_plans` call
 that places skill trees, rendered worker agents, and the lifecycle hooks, then
 an idempotent merge of the five agentmaster hook events into `settings.json`.

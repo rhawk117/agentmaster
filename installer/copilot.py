@@ -2,7 +2,7 @@
 
 Composes the transactional actions core, the manifest, and the worker
 renderer into a single `install`/`uninstall` pair for the Copilot user
-scope. Ported from `install-copilot.sh` (lines 124-177): 4 rendered
+scope. Ported from the retired shell installer: 4 rendered
 workers plus 3 re-pinned coordinator files under `home/agents/`, the 3
 router-skill trees under `home/skills/`, the 5 hook scripts under
 `home/agentmaster-hooks/`, and a `home/hooks/agentmaster.json` event

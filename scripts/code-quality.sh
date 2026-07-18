@@ -12,7 +12,7 @@ source "$SCRIPT_DIR/log.sh"
 
 # Maintained shell scripts checked by bashate. Ignored rules are stylistic:
 # E006 (long lines) and E003 (indent width — log.sh uses consistent 2-space).
-SHELL_SCRIPTS=(install-claude.sh install-copilot.sh scripts/*.sh)
+SHELL_SCRIPTS=(scripts/*.sh)
 BASHATE_IGNORES="E003,E006"
 
 run_lint() {
