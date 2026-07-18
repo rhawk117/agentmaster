@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import sys
 
-if sys.version_info < (3, 14):
+# Runtime guard for interpreters below requires-python; keep despite UP036.
+if sys.version_info < (3, 14):  # noqa: UP036
     sys.stderr.write(
         'agentmaster installer requires Python 3.14+ (running '
         f'{sys.version_info.major}.{sys.version_info.minor}). '
@@ -25,14 +26,14 @@ if sys.version_info < (3, 14):
     )
     raise SystemExit(1)
 
-import argparse  # noqa: E402
-import re  # noqa: E402
-from pathlib import Path  # noqa: E402
-from typing import TYPE_CHECKING  # noqa: E402
+import argparse
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from installer import claude, copilot  # noqa: E402
-from installer.parity import validate  # noqa: E402
-from installer.render import sync_workers  # noqa: E402
+from installer import claude, copilot
+from installer.parity import validate
+from installer.render import sync_workers
 
 if TYPE_CHECKING:
     from installer.actions import InstallReport
