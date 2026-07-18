@@ -42,8 +42,8 @@ No clone needed for a pinned version: each GitHub Release attaches
 
 The superpowers plugin (obra) is required on both platforms — the plan
 phase uses `brainstorming` and `writing-plans`, and the handoff offers
-`executing-plans`. Both installers detect it and offer to install it from
-`obra/superpowers-marketplace`; without it, plan formalization falls back
+`executing-plans`. The installer detects it and prints the install commands
+for `obra/superpowers-marketplace`; without it, plan formalization falls back
 to inline structure, which works but is not the supported configuration.
 
 ## The pipeline
@@ -139,7 +139,8 @@ make check                          # ruff format+check, bashate, ty, compileall
 bash scripts/code-quality.sh all    # identical; use where make is absent
 ```
 
-`make help` lists every target: `check`, `lint`, `shell`, `typecheck`,
+`make help` lists every target — itself included; the rest are `check`,
+`lint`, `shell`, `typecheck`,
 `test`, `format`, `validate`, `sync`, `install`, `install-claude`,
 `install-copilot`, `uninstall`, `telemetry`, and `clean-telemetry`.
 
