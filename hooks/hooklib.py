@@ -27,7 +27,9 @@ _GIT_SUBCOMMAND_RE = re.compile(r'\bgit\s+(?:-\S+\s+)*([a-z-]+)')
 def read_payload() -> dict[str, Any]:
     """Read the hook payload from stdin, returning {} on malformed input."""
     with contextlib.suppress(Exception):
-        return json.loads(sys.stdin.read() or '{}')
+        payload = json.loads(sys.stdin.read() or '{}')
+        if isinstance(payload, dict):
+            return payload
     return {}
 
 

@@ -82,3 +82,9 @@ def test_workspace_and_agentmaster_dir(tmp_path):
     am = hooklib.agentmaster_dir(payload)
     assert am == tmp_path / '.agentmaster'
     assert am.is_dir()
+
+
+def test_read_payload_non_dict_json_returns_empty(monkeypatch):
+    for raw in ('[1, 2]', '"scout"', '42', 'null'):
+        monkeypatch.setattr(sys, 'stdin', io.StringIO(raw))
+        assert hooklib.read_payload() == {}
