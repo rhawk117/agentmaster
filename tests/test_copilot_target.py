@@ -164,7 +164,8 @@ def test_fake_manifest_installs_only_declared(tmp_path: Path) -> None:
 
     install(fake_root, home, model='m1', dry_run=False, manifest=manifest)
 
-    assert (home / 'agents' / 'scout.agent.md').is_file()
+    installed_scout = (home / 'agents' / 'scout.agent.md').read_text(encoding='utf-8')
+    assert 'shared body' in installed_scout  # rendered from the fake root, not the repo
     assert (home / 'agents' / 'co.agent.md').is_file()
     assert sorted(p.name for p in (home / 'agents').iterdir()) == [
         'co.agent.md',

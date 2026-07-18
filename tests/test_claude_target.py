@@ -215,7 +215,8 @@ def test_fake_manifest_installs_exactly_its_files(tmp_path: Path) -> None:
     install(root, home, model='opus', dry_run=False, manifest=manifest)
 
     assert (home / 'skills' / 'myskill' / 'SKILL.md').is_file()
-    assert (home / 'agents' / 'scout.md').is_file()
+    installed_scout = (home / 'agents' / 'scout.md').read_text(encoding='utf-8')
+    assert 'body' in installed_scout  # rendered from the fake root's shared body
     assert (home / 'agentmaster' / 'hooks' / 'myhook.py').is_file()
     assert not (home / 'agents' / 'explore.md').exists()
 

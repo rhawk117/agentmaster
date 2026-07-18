@@ -56,10 +56,10 @@ def _preflight(root: Path, manifest: Manifest) -> None:
         raise FileNotFoundError(msg)
 
 
-def _worker_plans(home: Path, manifest: Manifest) -> list[FilePlan]:
+def _worker_plans(root: Path, home: Path, manifest: Manifest) -> list[FilePlan]:
     return [
         FilePlan(
-            content=render_worker(worker, 'copilot', manifest),
+            content=render_worker(worker, 'copilot', manifest, root),
             destination=home / 'agents' / f'{worker}.agent.md',
         )
         for worker in manifest.workers
@@ -151,9 +151,10 @@ def install(
     applies all agents, skills, hooks, and the hook config in one
     transactional pass backed up under `home`.
     """
+    home = home.resolve()
     _preflight(root, manifest)
     plans = [
-        *_worker_plans(home, manifest),
+        *_worker_plans(root, home, manifest),
         *_coordinator_plans(root, home, model, manifest),
         *_skill_plans(root, home, manifest),
         *_hook_plans(root, home, manifest),
@@ -174,6 +175,7 @@ def uninstall(
     directory, and `home/hooks/agentmaster.json` only — other files under
     `home/hooks/` are left untouched.
     """
+    home = home.resolve()
     agents = (*manifest.workers, *manifest.copilot_coordinators)
     paths = [
         *(home / 'agents' / f'{name}.agent.md' for name in agents),

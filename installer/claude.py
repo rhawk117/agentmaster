@@ -84,7 +84,7 @@ def _agent_plans(root: Path, home: Path, manifest: Manifest) -> list[FilePlan]:
     rewritten = f'"{interpreter}" "{home.as_posix()}/agentmaster/hooks/git_guard.py"'
     plans: list[FilePlan] = []
     for worker in manifest.workers:
-        text = render_worker(worker, 'claude', manifest)
+        text = render_worker(worker, 'claude', manifest, root)
         text = text.replace(_GIT_GUARD_SOURCE, rewritten)
         plans.append(FilePlan(content=text, destination=home / 'agents' / f'{worker}.md'))
     for agent in manifest.claude_only_agents:
