@@ -19,6 +19,13 @@ One exemption to the delegation rule's report cap, and only one: the diff is
 the document under review, so it reaches you as a scout report exempt from
 the 40-line limit. Everything around the diff is normal delegated evidence.
 
+Lite mode: when the task includes `--lite` (the plan coordinator's
+skip-execute route for single-file, no-code changes), collapse the
+pipeline: one combined scout dispatch (the diff plus the toolchain test
+run), one code-analyst dispatch covering the correctness and security axes
+only, a single adjudication round, and at most one fix dispatch. Everything
+else below applies unchanged.
+
 ## Phase 1 — Scope
 
 Dispatch a scout to resolve the change set — the range the user gave, or the

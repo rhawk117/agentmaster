@@ -20,6 +20,12 @@ reading raw files or command output is billed at frontier rates and crowds out
 the reasoning you were elevated to do. Cheaper models are good at collecting
 evidence; you are good at deciding what it means. Keep those jobs separate.
 
+Model check: state in your first message which model you are running on. If
+it is not the frontier model pinned in this skill's frontmatter, tell the
+user to run `/model <pin>` (or to confirm the current model is acceptable)
+before anything is dispatched — skill-level pins are best-effort on current
+CLI versions.
+
 Task to plan: $ARGUMENTS
 
 Headless mode: when the arguments include `--headless` or the session is
@@ -34,6 +40,13 @@ single-group, low-risk change takes the lite path — one combined evidence
 dispatch, a one-group plan, a single critique round — and `--lite` in the
 arguments forces it. A task small enough that planning costs more than doing
 gets an honest recommendation to skip agentmaster and just make the change.
+A single-file, no-code task (docs, prose, comments, static config) defaults
+to that honest recommendation — the full pipeline's measured floor for a
+docs rewrite is roughly 355k subagent tokens. If the user still wants rigor
+for such a task, take the skip-execute variant: a lite evidence pass and a
+one-task plan, then skip agentmaster-execute entirely — after approval,
+dispatch one `implementer` with the single task directly and close with
+`agentmaster-review --lite`.
 
 ## Cost boundary
 
@@ -120,16 +133,22 @@ Report contract (paste into every dispatch):
 > numbers instead of pasting code; never include more than 5 consecutive
 > lines from any file. Before returning, save your complete raw evidence
 > (full outputs, full excerpts) to `.agentmaster/evidence/<question-slug>.md`
-> and cite that path in the report. End with `Confidence: high|medium|low`.
+> and cite that path in the report (if workspace writes are blocked, as in
+> plan mode, return the evidence inline and say so). End with
+> `Confidence: high|medium|low`.
 
 Maintain an evidence ledger as reports return: numbered entries tagged
 verified / inferred / unknown, each with its source report. Every claim in the
 plan will cite a ledger entry by number.
 
-Ledger persistence: after each batch is folded into the ledger, have a scout
-write the full ledger verbatim to `.agentmaster/ledger.md`, overwriting each
-time. That file is the ledger of record — the plan cites it, and if your
-context is ever compacted, re-hydrate by having a scout return it.
+Ledger persistence: outside plan mode, after each batch is folded into the
+ledger, have a scout write the full ledger verbatim to
+`.agentmaster/ledger.md`, overwriting each time. That file is the ledger of
+record — the plan cites it, and if your context is ever compacted,
+re-hydrate by having a scout return it. In plan mode, workspace writes are
+forbidden except the plan file: keep the ledger in-context, embed it in the
+plan document, and make persisting `.agentmaster/ledger.md` and any
+deferred evidence files the first act of execution.
 
 ## Fallback and escalation
 
@@ -225,10 +244,12 @@ is unavailable, write the plan document yourself with that structure.
 - Return the implementation plan only. Do not edit files or begin
   implementation.
 - Close with: where the plan lives, a three-sentence summary, the unresolved
-  questions, and the execution handoff: "Execute with
-  `/agentmaster-execute <plan path>` — it dispatches one implementer per
+  questions, and the execution handoff. State the handoff plainly:
+  agentmaster-execute is deliberately not model-invocable, so you cannot
+  chain into it — after approving the plan, the user types
+  `/agentmaster-execute <plan path>`, which dispatches one implementer per
   conflict-free parallel group, then chains into `agentmaster-review`;
-  implementation is not done until the review verdict is in."
+  implementation is not done until the review verdict is in.
 - Keep orchestration commentary brief throughout — narrate decisions, not
   tool mechanics.
 - Cost appendix: close with a dispatch ledger — every subagent dispatched,

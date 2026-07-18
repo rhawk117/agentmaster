@@ -98,10 +98,14 @@ SpotBugs, …).
 Coordinators pin the frontier model (Opus 4.8 here — swap the `model` lines
 if your org enables something else); workers pin haiku for retrieval and
 sonnet for analysis, critique, and implementation. On Claude Code the
-elevation is per-skill, so everyday sessions stay cheap; on Copilot the
-billing is multiplier-based, and pinning `scout` to a 0x included model
-makes evidence gathering effectively free. Worker `maxTurns` and `effort`
-values are the runaway-spend caps — tune per repo size.
+elevation is per-skill, so everyday sessions stay cheap — but skill-level
+pins are best-effort on current CLI versions, so the plan and review skills
+state the model they are running on at phase start and `/model` is the
+check. On Copilot the billing is multiplier-based, and pinning `scout` to a
+0x included model makes evidence gathering effectively free. Worker
+`maxTurns` and `effort` values are the runaway-spend caps — tune per repo
+size; the telemetry model column records which model each worker actually
+ran on, so pin effectiveness is verifiable from data.
 
 ## Telemetry
 

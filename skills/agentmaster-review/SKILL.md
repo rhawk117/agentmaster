@@ -30,6 +30,19 @@ Headless mode: when the arguments include `--headless` or the session is
 non-interactive, deliver the verdict and open items without asking the user
 anything; unresolved items surface in the report, never as questions.
 
+Lite mode: with `--lite` in the arguments (the plan skill's skip-execute
+route for single-file, no-code changes), collapse the pipeline: one combined
+scout dispatch (the diff plus the toolchain test run), one code-analyst
+dispatch covering the correctness and security axes only, a single
+adjudication round, and at most one fix dispatch. Everything else below
+applies unchanged.
+
+Model check: state in your first message which model you are running on. If
+it is not the frontier model pinned in this skill's frontmatter, tell the
+user to run `/model <pin>` (or to confirm the current model is acceptable)
+before anything is dispatched — skill-level pins are best-effort on current
+CLI versions.
+
 ## Cost boundary
 
 - Do not use Read, Grep, Glob, Bash, WebSearch, WebFetch, Edit, Write, or MCP
