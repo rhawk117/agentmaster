@@ -3,25 +3,9 @@
 import contextlib
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any
-
-SAFE_GIT_SUBCOMMANDS = frozenset({
-    'status',
-    'diff',
-    'log',
-    'show',
-    'blame',
-    'rev-parse',
-    'ls-files',
-    'grep',
-    'describe',
-    'shortlog',
-})
-
-_GIT_SUBCOMMAND_RE = re.compile(r'\bgit\s+(?:-\S+\s+)*([a-z-]+)')
 
 
 def read_payload() -> dict[str, Any]:
@@ -53,16 +37,26 @@ def debug_dump(payload: dict[str, Any]) -> None:
             f.write(json.dumps(payload) + '\n')
 
 
+def current_phase(am: Path) -> str:
+    """Return the active phase named in .phase, or '' when absent/unreadable."""
+    try:
+        return (am / '.phase').read_text().strip().split()[0]
+    except Exception:
+        return ''
+
+
 def append_telemetry(
     payload: dict[str, Any],
     agent: str,
     tokens: str | int = '',
     duration_ms: str | int = '',
+    model: str = '',
 ) -> None:
     """Append a telemetry row for the given agent to telemetry.md."""
     am = agentmaster_dir(payload)
+    phase = current_phase(am) or 'hook'
     with (am / 'telemetry.md').open('a') as f:
-        f.write(f'hook,{agent},,{tokens},{duration_ms}\n')
+        f.write(f'{phase},{agent},{model},{tokens},{duration_ms}\n')
 
 
 def tool_name(payload: dict[str, Any]) -> str:
@@ -79,11 +73,3 @@ def tool_args(payload: dict[str, Any]) -> dict[str, Any]:
         or payload.get('tool_input')
         or {}
     )
-
-
-def first_blocked_git_subcommand(command: str) -> str | None:
-    """Return the first git subcommand in command that is not read-only."""
-    for m in _GIT_SUBCOMMAND_RE.finditer(command):
-        if m.group(1) not in SAFE_GIT_SUBCOMMANDS:
-            return m.group(1)
-    return None

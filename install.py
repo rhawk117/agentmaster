@@ -6,10 +6,10 @@ Commands:
     python install.py validate  --target all
     python install.py sync
 
-`--model` (and, for Copilot, `--git-guard/--no-git-guard`) win when given; when
-absent on an interactive terminal the installer asks, otherwise it uses the
-per-platform default silently. Destinations honor `CLAUDE_CONFIG_DIR` /
-`COPILOT_CONFIG_DIR` and the `--claude-dir` / `--copilot-dir` overrides.
+`--model` wins when given; when absent on an interactive terminal the
+installer asks, otherwise it uses the per-platform default silently.
+Destinations honor `CLAUDE_CONFIG_DIR` / `COPILOT_CONFIG_DIR` and the
+`--claude-dir` / `--copilot-dir` overrides.
 Exit code is 0 on success, 1 on any failure or validation finding.
 """
 
@@ -88,18 +88,6 @@ def _resolve_model(target: str, args: argparse.Namespace) -> str:
     return DEFAULT_MODEL[target]
 
 
-def _resolve_git_guard(args: argparse.Namespace) -> bool:
-    if args.git_guard is not None:
-        return args.git_guard
-    if sys.stdin.isatty():
-        reply = input(
-            'enable the git-guard hook? (blocks write git for ALL Copilot '
-            'sessions; AGENTMASTER_GIT_GUARD=off disables) [Y/n]: '
-        ).strip()
-        return not reply.lower().startswith('n')
-    return True
-
-
 def _print_report(target: str, report: InstallReport) -> None:
     for status, path in report.entries:
         print(f'  {status:>6}  {path}')
@@ -132,13 +120,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
             if target == 'claude':
                 report = claude.install(ROOT, home, model=model, dry_run=args.dry_run)
             else:
-                report = copilot.install(
-                    ROOT,
-                    home,
-                    model=model,
-                    dry_run=args.dry_run,
-                    git_guard=_resolve_git_guard(args),
-                )
+                report = copilot.install(ROOT, home, model=model, dry_run=args.dry_run)
         except (OSError, ValueError) as error:
             print(f'{target}: install failed: {error}', file=sys.stderr)
             return 1
@@ -197,12 +179,6 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument('--copilot-dir', default=None)
         if name == 'install':
             cmd.add_argument('--model', default=None)
-            cmd.add_argument(
-                '--git-guard',
-                action=argparse.BooleanOptionalAction,
-                default=None,
-                help='wire the Copilot git-guard hook (default: yes)',
-            )
     args = parser.parse_args(argv)
     return commands[args.command](args)
 

@@ -36,6 +36,11 @@ Dispatch independent questions in parallel where the platform allows. Ask the
 user directly in the conversation when requirements are ambiguous — a
 clarifying question is free; a worker dispatched at the wrong target is not.
 
+Phase marker: your first scout dispatch of this phase also runs
+`printf 'plan\n' > .agentmaster/.phase` before its question — the marker
+stamps every telemetry row with the phase. Skip it when workspace writes are
+blocked (plan mode).
+
 ## Phase 1 — Frame
 
 Restate the goal in one paragraph: what must be observably true when the
@@ -46,7 +51,12 @@ end with a `BLOCKED:` report if no safe default exists. Proportionality
 gate: judge first whether the task earns the pipeline — a single-group,
 low-risk change takes the lite path (one combined evidence dispatch, a
 one-group plan, one critique round; `--lite` forces it), and a task smaller
-than its own plan gets an honest recommendation to skip agentmaster. If the superpowers
+than its own plan gets an honest recommendation to skip agentmaster. A
+single-file, no-code task (docs, prose, comments, static config) defaults
+to that honest recommendation; if the user still wants rigor, take the
+skip-execute variant — a lite evidence pass, a one-task plan, then after
+acceptance dispatch one `implementer` with the single task directly and
+close with the `agentmaster-review` agent in `--lite` mode. If the superpowers
 `brainstorming` skill is available and the problem has genuine design
 freedom, run it to enumerate approaches before gathering evidence; skip it
 for well-scoped fixes. Then inventory usable
@@ -141,11 +151,14 @@ yourself in that structure.
 
 Return the implementation plan only — do not edit files or begin
 implementation. Close with a three-sentence summary, the unresolved
-questions, and the handoff: at the Plan Ready for Review prompt, exit plan
-mode, then run the `agentmaster-execute` agent — it dispatches one
-`implementer` per parallel group, performs the full review, and runs the fix
-loop; implementation is not done until its verdict is
-in. Keep orchestration commentary brief — narrate decisions, not tool
+questions, and the handoff, stated plainly as the user's action: at the
+Plan Ready for Review prompt, the user exits plan mode and selects the
+`agentmaster-execute` agent (via `/agent`) themselves — you cannot chain
+into it. It dispatches one `implementer` per parallel group, performs the
+full review, and runs the fix loop; implementation is not done until its
+verdict is in. Keep orchestration commentary brief — narrate decisions, not tool
 mechanics. Close with a cost appendix — every dispatch, its agent and
-model — appended as `phase,agent,model,tokens,duration_ms` lines to `.agentmaster/telemetry.md` via a scout; check `/usage`
-for the premium-request spend this phase.
+model. Telemetry rows are recorded automatically by the hook layer, stamped
+with the phase named in `.agentmaster/.phase`; do not append rows yourself.
+Your final scout dispatch clears `.agentmaster/.phase` (writes it empty);
+check `/usage` for the premium-request spend this phase.

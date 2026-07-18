@@ -8,7 +8,7 @@ hooks:
     - matcher: "Read|Grep|Glob|Bash|WebFetch|WebSearch|Edit|Write|NotebookEdit"
       hooks:
         - type: command
-          command: "echo 'agentmaster cost boundary: this phase never touches the repository directly - delegate to scout or code-analyst' >&2; exit 2"
+          command: 'python3 "$HOME/.claude/agentmaster/hooks/cost_boundary.py"'
 ---
 
 # Agentmaster Review
@@ -30,6 +30,19 @@ Headless mode: when the arguments include `--headless` or the session is
 non-interactive, deliver the verdict and open items without asking the user
 anything; unresolved items surface in the report, never as questions.
 
+Lite mode: with `--lite` in the arguments (the plan skill's skip-execute
+route for single-file, no-code changes), collapse the pipeline: one combined
+scout dispatch (the diff plus the toolchain test run), one code-analyst
+dispatch covering the correctness and security axes only, a single
+adjudication round, and at most one fix dispatch. Everything else below
+applies unchanged.
+
+Model check: state in your first message which model you are running on. If
+it is not the frontier model pinned in this skill's frontmatter, tell the
+user to run `/model <pin>` (or to confirm the current model is acceptable)
+before anything is dispatched — skill-level pins are best-effort on current
+CLI versions.
+
 ## Cost boundary
 
 - Do not use Read, Grep, Glob, Bash, WebSearch, WebFetch, Edit, Write, or MCP
@@ -44,6 +57,11 @@ anything; unresolved items surface in the report, never as questions.
 - You may: dispatch subagents via the Agent tool, read their reports, invoke
   skills, ask the user questions with AskUserQuestion, dispatch implementers
   for accepted fixes, and produce the review report. Nothing else.
+
+Phase marker: before anything else, write the single word `review` to
+`.agentmaster/.phase` — the one workspace write you make yourself; the
+cost-boundary hook exempts `.agentmaster/`. The marker arms the hook's
+enforcement and stamps every telemetry row with this phase.
 
 ## Phase 1 — Scope
 
@@ -144,9 +162,12 @@ Do not edit files yourself at any point. Keep orchestration commentary brief —
 narrate rulings, not tool mechanics.
 - Cost appendix: close with a dispatch ledger — every subagent dispatched,
   its agent type and model, and the tokens and duration from its completion
-  notice where the platform reports them — and have a scout append that
-  table as `phase,agent,model,tokens,duration_ms` lines to `.agentmaster/telemetry.md`. Tuning `maxTurns` and model pins is
+  notice where the platform reports them. Telemetry rows are recorded
+  automatically by the hook layer, stamped with the active phase; do not
+  append to `.agentmaster/telemetry.md`. Tuning `maxTurns` and model pins is
   done from this data, not by feel.
+- Phase teardown: clear `.agentmaster/.phase` by overwriting it with empty
+  content, retiring the cost boundary for this phase.
 - Phase boundary: this phase ends with this output. Remind the user the
   session may still be on this skill's elevated model (`/model` to check; a
   fresh session drops back), and do not begin the next phase in this turn.

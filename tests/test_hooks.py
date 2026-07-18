@@ -1,5 +1,6 @@
 """Tests for the agentmaster lifecycle hook scripts."""
 
+import json
 import os
 import time
 
@@ -24,6 +25,58 @@ def test_telemetry_writes_line_and_consumes_start(tmp_path, run_hook):
     assert line.startswith('hook,scout,,42,')
     assert line.endswith('\n')
     assert not (starts / 'abc').exists()
+
+
+def test_telemetry_row_carries_phase_and_model(tmp_path, run_hook):
+    am = tmp_path / '.agentmaster'
+    (am / '.starts').mkdir(parents=True)
+    (am / '.phase').write_text('execute\n')
+    (am / '.starts' / 'abc').write_text(str(time.time() - 1))
+    session = tmp_path / 'session'
+    (session / 'subagents').mkdir(parents=True)
+    entry = {
+        'message': {
+            'model': 'claude-haiku-4-5',
+            'usage': {'input_tokens': 10, 'output_tokens': 5},
+        }
+    }
+    (session / 'subagents' / 'agent-abc.jsonl').write_text(json.dumps(entry) + '\n')
+    payload = {
+        'cwd': str(tmp_path),
+        'agent_type': 'scout',
+        'agent_id': 'abc',
+        'transcript_path': str(session / 'main.jsonl'),
+    }
+    result = run_hook('telemetry', payload)
+    assert result.returncode == 0
+    line = (am / 'telemetry.md').read_text()
+    assert line.startswith('execute,scout,claude-haiku-4-5,15,')
+
+
+def test_telemetry_finds_transcript_in_session_dir(tmp_path, run_hook):
+    # Live CLI layout: <dir>/<session>.jsonl with <dir>/<session>/subagents/.
+    am = tmp_path / '.agentmaster'
+    (am / '.starts').mkdir(parents=True)
+    (am / '.starts' / 'abc').write_text(str(time.time() - 1))
+    session_dir = tmp_path / 'projects' / 'session-1'
+    (session_dir / 'subagents').mkdir(parents=True)
+    entry = {
+        'message': {
+            'model': 'claude-haiku-4-5',
+            'usage': {'input_tokens': 7, 'output_tokens': 3},
+        }
+    }
+    (session_dir / 'subagents' / 'agent-abc.jsonl').write_text(json.dumps(entry) + '\n')
+    payload = {
+        'cwd': str(tmp_path),
+        'agent_type': 'scout',
+        'agent_id': 'abc',
+        'transcript_path': str(tmp_path / 'projects' / 'session-1.jsonl'),
+    }
+    result = run_hook('telemetry', payload)
+    assert result.returncode == 0
+    line = (am / 'telemetry.md').read_text()
+    assert line.startswith('hook,scout,claude-haiku-4-5,10,')
 
 
 def test_subagent_start_records_timestamp(tmp_path, run_hook):
@@ -64,45 +117,66 @@ def test_session_context_silent_without_artifacts(tmp_path, run_hook):
     assert result.stdout.strip() == ''
 
 
-def test_git_guard_blocks_push_claude_shape(tmp_path, run_hook):
-    payload = {'cwd': str(tmp_path), 'tool_input': {'command': 'git push'}}
-    result = run_hook('git_guard', payload)
-    assert result.returncode == 2
-    assert 'git push' in result.stderr
-    assert result.stdout.strip() == ''
+def _arm_phase(tmp_path, phase='plan'):
+    am = tmp_path / '.agentmaster'
+    am.mkdir(exist_ok=True)
+    (am / '.phase').write_text(f'{phase}\n')
+    return am
 
 
-def test_git_guard_blocks_push_copilot_shape(tmp_path, run_hook):
+def test_cost_boundary_blocks_repo_write_during_phase(tmp_path, run_hook):
+    _arm_phase(tmp_path)
     payload = {
         'cwd': str(tmp_path),
-        'toolName': 'execute',
-        'toolArgs': {'command': 'git push origin main'},
+        'tool_name': 'Write',
+        'tool_input': {'file_path': str(tmp_path / 'src' / 'main.py')},
     }
-    result = run_hook('git_guard', payload)
+    result = run_hook('cost_boundary', payload)
     assert result.returncode == 2
-    assert '"decision": "deny"' in result.stdout
+    assert 'plan phase' in result.stderr
 
 
-def test_git_guard_allows_diff(tmp_path, run_hook):
-    payload = {'cwd': str(tmp_path), 'tool_input': {'command': 'git diff'}}
-    result = run_hook('git_guard', payload)
+def test_cost_boundary_blocks_bash_during_phase(tmp_path, run_hook):
+    _arm_phase(tmp_path, 'review')
+    payload = {
+        'cwd': str(tmp_path),
+        'tool_name': 'Bash',
+        'tool_input': {'command': 'pytest'},
+    }
+    result = run_hook('cost_boundary', payload)
+    assert result.returncode == 2
+
+
+def test_cost_boundary_allows_write_outside_workspace(tmp_path, run_hook):
+    _arm_phase(tmp_path)
+    plan_file = tmp_path.parent / 'claude-plans' / 'plan.md'
+    payload = {
+        'cwd': str(tmp_path),
+        'tool_name': 'Write',
+        'tool_input': {'file_path': str(plan_file)},
+    }
+    result = run_hook('cost_boundary', payload)
     assert result.returncode == 0
 
 
-def test_git_guard_ignores_non_shell_tool(tmp_path, run_hook):
+def test_cost_boundary_allows_agentmaster_write(tmp_path, run_hook):
+    am = _arm_phase(tmp_path)
     payload = {
         'cwd': str(tmp_path),
-        'toolName': 'read_file',
-        'toolArgs': {'command': 'git push'},
+        'tool_name': 'Write',
+        'tool_input': {'file_path': str(am / '.phase')},
     }
-    result = run_hook('git_guard', payload)
+    result = run_hook('cost_boundary', payload)
     assert result.returncode == 0
 
 
-def test_git_guard_off_switch(tmp_path, run_hook):
-    env = {**os.environ, 'AGENTMASTER_GIT_GUARD': 'off'}
-    payload = {'cwd': str(tmp_path), 'tool_input': {'command': 'git push'}}
-    result = run_hook('git_guard', payload, env=env)
+def test_cost_boundary_noop_without_marker(tmp_path, run_hook):
+    payload = {
+        'cwd': str(tmp_path),
+        'tool_name': 'Bash',
+        'tool_input': {'command': 'pytest'},
+    }
+    result = run_hook('cost_boundary', payload)
     assert result.returncode == 0
 
 
@@ -125,7 +199,7 @@ def test_malformed_json_exits_zero_everywhere(run_hook):
         'subagent_start',
         'precompact_snapshot',
         'session_context',
-        'git_guard',
+        'cost_boundary',
         'dispatch_guard',
         'copilot_telemetry_pre',
         'copilot_telemetry_post',

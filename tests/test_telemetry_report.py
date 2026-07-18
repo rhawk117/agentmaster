@@ -113,6 +113,42 @@ def test_report_summarizes_per_agent(tmp_path):
 
 
 @pytest.mark.subprocess
+def test_report_summarizes_phases_and_models(tmp_path):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'telemetry.md').write_text(
+        'hook,scout,,120,3000\n'
+        'plan,scout,claude-haiku-4-5,100,2000\n'
+        'plan,code-analyst,claude-sonnet-4-6,50,1000\n'
+        'review,implementer,claude-sonnet-4-6,25,500\n'
+    )
+
+    result = _run_report(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert 'phase' in result.stdout
+    assert 'plan' in result.stdout
+    assert 'review' in result.stdout
+    assert 'model' in result.stdout
+    assert 'claude-haiku-4-5' in result.stdout
+    assert '150' in result.stdout  # plan-phase token subtotal
+
+
+def test_prune_removes_stale_phase_marker(tmp_path):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'telemetry.md').write_text('hook,scout,,1,1\n', encoding='utf-8')
+    marker = am / '.phase'
+    marker.write_text('plan\n', encoding='utf-8')
+    os.utime(marker, (time.time() - 90000, time.time() - 90000))
+
+    actions = prune(am, keep_lines=500, keep_snapshots=5, dry_run=False)
+
+    assert actions == ['.phase: remove stale phase marker']
+    assert not marker.exists()
+
+
+@pytest.mark.subprocess
 def test_report_missing_file_exits_one(tmp_path):
     result = _run_report(tmp_path)
 
