@@ -1,1 +1,198 @@
 # agentmaster
+
+Expensive head, cheap hands. A master decision-maker on a frontier reasoning
+model that never touches the repository, commanding subagent workers that do
+all the reading, running, and writing — with adversarial gates at both ends:
+a critic that assumes the plan is wrong before anything is built, and a
+reviewer that assumes the code is guilty after it is. Language-agnostic:
+every stage runs the project's own toolchain, detected at plan time.
+
+Works on Claude Code (skills + agents) and GitHub Copilot (custom agents).
+
+## Requirements
+
+The superpowers plugin (obra) is required on both platforms — the plan
+phase uses `brainstorming` and `writing-plans`, and the handoff offers
+`executing-plans`. Both installers detect it and offer to install it from
+`obra/superpowers-marketplace`; without it, plan formalization falls back
+to inline structure, which works but is not the supported configuration.
+Workers assume nothing else beyond the project's own toolchain.
+
+## The pipeline
+
+Three deliberate invocations, no freehand prompting between phases:
+
+1. `agentmaster-plan` (Opus) — frames the goal, inventories usable skills
+   and tools, detects the project toolchain, gathers evidence through
+   parallel `scout` (haiku) and `code-analyst` (sonnet) dispatches into a
+   cited evidence ledger, drafts a plan with conflict-free parallel groups,
+   survives up to two rounds of `plan-critic` adversarial review, and
+   formalizes via superpowers `writing-plans` when present.
+2. `agentmaster-execute` — runs the plan's declared execution mode:
+   sequential by default (one `implementer` on sonnet carried across groups,
+   so conventions stay coherent), parallel only when the plan justifies
+   semantic independence, with an optional pilot group checked first. Gates
+   every task on its verification, independently re-runs the riskiest ones,
+   runs a cross-group coherence pass on the combined diff, then chains into
+   the review.
+3. `agentmaster-review` (Opus) — assumes the code is bad and makes it prove
+   otherwise across five evidence axes: correctness, bugs, and regressions
+   (full-suite runs, any severity); structure quality — SOLID, YAGNI, DRY —
+   and testability and flexibility-to-change (capped at major); security
+   (any severity). Adjudicates every finding in writing, dispatches fix
+   implementers, re-reviews once with a full-suite re-run, then surfaces
+   anything still open.
+
+Evidence discipline throughout: workers return capped structured reports
+(verified / inferred / unknown, `file:line` citations, no code dumps); a
+blocked scout escalates once to the analyst, then the question becomes a
+recorded unknown — never an orchestrator improvisation, never a theory in
+place of evidence.
+
+## Language-agnostic by design
+
+The planning phase's first dispatch is always a toolchain scout: it reads
+manifests and CI configuration (pyproject, package.json, Cargo.toml, go.mod,
+Maven/Gradle files, Makefiles, workflow definitions) and records the
+project's canonical test, lint, security-scan, and build commands — with
+file evidence — into the plan's Toolchain section. Execution and review run
+those recorded commands. Nothing in the suite assumes Python, `uv`, or any
+particular runner; the security axis uses whatever the ecosystem provides
+(bandit/semgrep, eslint security rules, npm audit, gosec, cargo audit,
+SpotBugs, …).
+
+## Install
+
+### Claude Code
+
+```bash
+bash install-claude.sh
+```
+
+The installer checks for superpowers (offering to install it), asks which
+frontier model plan and review should run, installs the three skills and
+five agents with backups, removes legacy `delegated-*` names on request, and
+wires the hook layer: hook scripts to `~/.claude/agentmaster/hooks/` plus an
+idempotent merge of five events into `~/.claude/settings.json` that never
+touches your existing hooks (a timestamped backup is taken anyway). Manual
+install remains:
+
+```bash
+cp -r skills/* ~/.claude/skills/
+cp agents/*.md ~/.claude/agents/
+# migrating from the delegated-* names:
+rm -rf ~/.claude/skills/delegated-planning ~/.claude/skills/delegated-review \
+       ~/.claude/skills/delegated-execution
+```
+
+Restart once if `~/.claude/skills/` or `~/.claude/agents/` are new. Keep
+`CLAUDE_CODE_SUBAGENT_MODEL` unset — it silently overrides every worker's
+model pin. The shipped `Explore` override keeps Claude's automatic
+exploration on haiku.
+
+### GitHub Copilot
+
+```bash
+bash install-copilot.sh
+```
+
+The installer checks for the superpowers plugin (and offers to install it),
+asks which frontier model the coordinators should run (default Opus 4.8),
+backs up existing agents, installs all seven, and offers to remove legacy
+`delegated-*` files from a pre-rebrand install. Platform specifics live in
+`copilot/README.md`.
+
+## Models and cost
+
+Coordinators pin the frontier model (Opus 4.8 here — swap the `model` lines
+if your org enables something else); workers pin haiku for retrieval and
+sonnet for analysis, critique, and implementation. On Claude Code the
+elevation is per-skill, so everyday sessions stay cheap; on Copilot the
+billing is multiplier-based, and pinning `scout` to a 0x included model
+makes evidence gathering effectively free. Worker `maxTurns` and `effort`
+values are the runaway-spend caps — tune per repo size.
+
+## Hardening: how each former weakness is now addressed
+
+1. Prose-only cost boundary (Claude Code) → default-on `PreToolUse` hooks in
+   all three skills block Read/Grep/Glob/Bash/Web/Edit/Write in the main
+   thread with a delegation reminder (execute keeps Read for the plan file).
+   Residual: Claude Code prompts once to approve skills that define hooks,
+   and hook lifetime past the phase should be spot-checked per CLI version —
+   the failure direction is over-blocking, which is safe.
+2. Elevation-lifetime ambiguity → every phase ends with an explicit phase
+   boundary: it reminds you the session may still be elevated (`/model` to
+   check, fresh session to drop) and refuses to roll into the next phase in
+   the same turn. Each next phase re-pins its own model on invocation.
+3. Ledger volatility → ledgers are persisted artifacts: a scout writes
+   `.agentmaster/ledger.md` after every dispatch batch and
+   `.agentmaster/review-ledger.md` after adjudication; compacted context
+   re-hydrates from the file of record.
+4. Lossy report caps → workers save complete raw evidence to
+   `.agentmaster/evidence/<question-slug>.md` and cite the path, so capped
+   reports lose nothing recoverable; orchestrators refuse to read past the
+   contract sections of an over-cap report and re-dispatch narrower.
+5. File ownership ≠ resource ownership → the toolchain scout also inventories
+   shared mutable resources; the plan carries a Shared resources section
+   (owner group or SERIALIZE per resource), tasks touching serialized
+   resources are tagged `verification: serialized` and run in sequence by
+   the execution coordinator, and the plan-critic treats omissions in that
+   section as findings.
+6. Self-reported verification → execution independently re-runs at least the
+   highest-risk verification of every group via scout before the gate;
+   serialized verifications are always scout-run, never implementer-claimed.
+7. Criteria triplication → single source of truth: `criteria/review-criteria.md`
+   injected between markers into all three carriers by `./sync-criteria.sh`.
+   Edit the master, run the script; the copies are generated, not maintained.
+8. `/fleet` foot-gun → the plan document opens with an execution contract
+   instructing any fleet/autopilot/generic agent that reads it to stop and
+   hand back to `agentmaster-execute` — the artifact defends itself even
+   when the menu is mis-clicked. Residual: a worker that ignores its input
+   entirely isn't stopped by anything but the docs.
+9. No cost telemetry → every phase closes with a cost appendix (each
+   dispatch, agent, model, and tokens/duration where the platform reports
+   them) appended to `.agentmaster/telemetry.md`; tuning `maxTurns` and
+   model pins is done from that file, not by feel. Residual: Copilot
+   reports per-request multipliers via `/usage`, not per-subagent tokens.
+10. No evals → `evals/evals.json` ships five cross-stack cases (JS/TS plan,
+    headless Go plan, execution chain, seeded-flaw review, trigger-gating)
+    with objective assertions, ready for the skill-creator run loop in
+    Claude Code. Residual: authored, not yet executed at scale — run them.
+11. Interactive-only seams → headless mode in every phase: `--headless` (or a
+    non-interactive session) replaces questions with ASSUMED
+    least-destructive defaults recorded in Open Questions, or a machine-
+    readable `BLOCKED:` report when no safe default exists. CI entry:
+    `claude -p "/agentmaster-plan --headless <task>"`.
+
+## Claude Code hook layer
+
+Six lifecycle hooks convert protocol into mechanism, unique to Claude Code:
+`SubagentStart`/`SubagentStop` (roster-scoped) measure every worker dispatch
+into `.agentmaster/telemetry.md` — tokens from the payload or summed from
+the subagent transcript, duration from a start-timestamp pair — so telemetry
+no longer depends on the orchestrator remembering; a `PreToolUse` guard on
+the `Agent` tool blocks all dispatch while `CLAUDE_CODE_SUBAGENT_MODEL` is
+exported, since that variable silently defeats the tiering; `PreCompact`
+snapshots `.agentmaster/` before compaction; `SessionStart` injects a
+re-hydration pointer whenever a project carries agentmaster artifacts; and
+the implementer carries a frontmatter `git-guard` (default-deny on git
+subcommands with a read-only allowlist — the operator owns git, enforced
+only while an implementer runs). All scripts parse hook JSON permissively
+across CLI versions; `AGENTMASTER_HOOK_DEBUG=1` dumps raw payloads to
+`.agentmaster/hook-debug.jsonl` for one-run verification.
+
+## Research-driven revisions
+
+The v2 pass applies the multi-agent literature's strongest critiques of the
+original design: write work parallelizes poorly, so sequential execution
+with one carried implementer is now the default and `parallel` must be
+argued; a coherence pass over the combined diff closes the merge-divergence
+gap parallel mode leaves; a proportionality gate (and `--lite`) keeps the
+15x-class token ceremony away from tasks that don't decompose — including
+recommending no pipeline at all for trivial changes; serialized
+verifications batch into one dispatch; telemetry follows a fixed
+`phase,agent,model,tokens,duration_ms` schema summarized by
+`./telemetry-report.sh`; and `./sync-criteria.sh --check` fails CI on
+criteria drift.
+
+
