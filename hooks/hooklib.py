@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 
 def read_payload() -> dict[str, Any]:
@@ -57,6 +57,45 @@ def append_telemetry(
     phase = current_phase(am) or 'hook'
     with (am / 'telemetry.md').open('a') as f:
         f.write(f'{phase},{agent},{model},{tokens},{duration_ms}\n')
+
+
+class CompactionContext(NamedTuple):
+    """Fields optionally present on a PreCompact hook payload."""
+
+    agent_type: str
+    trigger: str
+    threshold_percent: str
+    pre_tokens: str
+    post_tokens: str
+    session_id: str
+
+
+def compaction_context(payload: dict[str, Any]) -> CompactionContext:
+    """Defensively extract compaction fields from a PreCompact payload.
+
+    Every field degrades to '' (agent_type to 'main') when the provider
+    omits it or the payload shape is unexpected; extraction never raises.
+    """
+    with contextlib.suppress(Exception):
+        return CompactionContext(
+            agent_type=str(
+                payload.get('agent_type') or payload.get('agent_name') or 'main'
+            ),
+            trigger=str(payload.get('trigger') or ''),
+            threshold_percent=str(
+                payload.get('threshold_percent')
+                or payload.get('auto_compact_percent')
+                or ''
+            ),
+            pre_tokens=str(
+                payload.get('pre_tokens') or payload.get('tokens_before') or ''
+            ),
+            post_tokens=str(
+                payload.get('post_tokens') or payload.get('tokens_after') or ''
+            ),
+            session_id=str(payload.get('session_id') or payload.get('agent_id') or ''),
+        )
+    return CompactionContext('main', '', '', '', '', '')
 
 
 def tool_name(payload: dict[str, Any]) -> str:
