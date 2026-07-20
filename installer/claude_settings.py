@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+AUTO_COMPACT_ENV_KEY = 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'
+
 
 class ClaudeSettingsError(ValueError):
     """`settings.json` (or a value derived from it) has an invalid shape.
@@ -146,4 +148,59 @@ def strip_hook_events(settings: Mapping[str, object], owned: Mapping[str, list])
             hooks[event] = [entry for entry in hooks[event] if entry not in owned_entries]
     new_settings = dict(settings)
     new_settings['hooks'] = hooks
+    return new_settings
+
+
+def _env_dict(settings: Mapping[str, object]) -> dict[str, str]:
+    """Return `settings['env']`; callers assume pre-validated shape."""
+    env = settings.get('env')
+    if not isinstance(env, dict):
+        return {}
+    return {
+        key: value
+        for key, value in env.items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+
+
+def merge_auto_compact_override(
+    settings: Mapping[str, object], *, owned: Mapping[str, object] | None, percent: int
+) -> tuple[dict, dict[str, object]]:
+    """Return `(new_settings, new_owned)` setting the auto-compact env override.
+
+    The first time Agentmaster takes ownership of `AUTO_COMPACT_ENV_KEY`
+    (`owned` is `None`), the current environment value is captured as
+    `new_owned['original']` so a later `strip_auto_compact_override` can
+    restore exactly the pre-Agentmaster value (SPEC.md §15). A later call
+    with `owned` already set reuses its recorded `original` rather than
+    re-capturing Agentmaster's own prior value.
+    """
+    env = _env_dict(settings)
+    original = owned['original'] if owned is not None else env.get(AUTO_COMPACT_ENV_KEY)
+    env[AUTO_COMPACT_ENV_KEY] = str(percent)
+    new_settings = dict(settings)
+    new_settings['env'] = env
+    return new_settings, {'value': str(percent), 'original': original}
+
+
+def strip_auto_compact_override(
+    settings: Mapping[str, object], owned: Mapping[str, object] | None
+) -> dict:
+    """Restore the pre-Agentmaster env value only if it still matches what we set.
+
+    Mirrors `strip_hook_events`: a user edit since install (the current env
+    value no longer equals `owned['value']`) survives and is left alone.
+    """
+    if owned is None:
+        return dict(settings)
+    env = _env_dict(settings)
+    if env.get(AUTO_COMPACT_ENV_KEY) != owned.get('value'):
+        return dict(settings)
+    original = owned.get('original')
+    if isinstance(original, str):
+        env[AUTO_COMPACT_ENV_KEY] = original
+    else:
+        env.pop(AUTO_COMPACT_ENV_KEY, None)
+    new_settings = dict(settings)
+    new_settings['env'] = env
     return new_settings

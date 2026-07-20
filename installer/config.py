@@ -155,6 +155,8 @@ class UnresolvedConfig:
     no_ledger: bool = False
     artifact_dir: Path | None = None
     delivery_mode: DeliveryMode | None = None
+    auto_compact_percent: int | None = None
+    clear_auto_compact_override: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,6 +352,58 @@ def _reject_present(
         if getattr(unresolved, name) is not None:
             flag = f'--{name.replace("_", "-")}'
             raise ConfigError(flag, f'requires --target {target_name} or all')
+
+
+def validate_auto_compact_flags(unresolved: UnresolvedConfig) -> None:
+    """Reject an invalid percentage, both flags together, or a non-Claude target.
+
+    Raises
+    ------
+    ConfigError
+        `--auto-compact-percent` is outside 1..100, `--auto-compact-percent`
+        and `--clear-auto-compact-override` were both given, or either was
+        given without `claude` selected (SPEC.md §15).
+    """
+    percent = unresolved.auto_compact_percent
+    if percent is not None:
+        if not 1 <= percent <= 100:
+            raise ConfigError(
+                '--auto-compact-percent', 'must be an integer from 1 through 100'
+            )
+        if unresolved.clear_auto_compact_override:
+            raise ConfigError(
+                '--auto-compact-percent',
+                'cannot be combined with --clear-auto-compact-override',
+            )
+    if Target.CLAUDE in set(unresolved.target.expand()):
+        return
+    if percent is not None:
+        raise ConfigError('--auto-compact-percent', 'requires --target claude or all')
+    if unresolved.clear_auto_compact_override:
+        raise ConfigError(
+            '--clear-auto-compact-override', 'requires --target claude or all'
+        )
+
+
+def resolve_auto_compact(
+    *,
+    explicit_percent: int | None,
+    explicit_clear: bool,
+    no_input: bool,
+    is_tty: bool,
+    prompt: Callable[[], tuple[int | None, bool]] | None = None,
+) -> tuple[int | None, bool]:
+    """Resolve the Claude auto-compact percent/clear intent for one install.
+
+    Returns `(percent, clear)`. An explicit flag always wins; otherwise an
+    interactive prompt runs when available; otherwise noninteractive install
+    preserves current behavior (`None, False`) per SPEC.md §15.
+    """
+    if explicit_percent is not None or explicit_clear:
+        return explicit_percent, explicit_clear
+    if is_tty and not no_input and prompt is not None:
+        return prompt()
+    return None, False
 
 
 def resolve_role(

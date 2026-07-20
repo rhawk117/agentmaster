@@ -39,7 +39,15 @@ def _roles(
 
 
 def install(
-    root, home, *, roles=None, dry_run=False, manifest=None, agentmaster_home=None
+    root,
+    home,
+    *,
+    roles=None,
+    dry_run=False,
+    manifest=None,
+    agentmaster_home=None,
+    auto_compact_percent=None,
+    clear_auto_compact_override=False,
 ):
     kwargs = {} if manifest is None else {'manifest': manifest}
     resolved_agentmaster_home = agentmaster_home or (home.parent / 'agentmaster-home')
@@ -54,6 +62,8 @@ def install(
         delivery_mode=DeliveryMode.LOCAL,
         raw_capture=RawCapture.FAILURES,
         redaction=RedactionMode.STANDARD,
+        auto_compact_percent=auto_compact_percent,
+        clear_auto_compact_override=clear_auto_compact_override,
         dry_run=dry_run,
         **kwargs,
     )
@@ -407,3 +417,107 @@ def test_second_install_owned_state_stays_stable(tmp_path: Path, repo_root) -> N
         status for status, path in report.entries if path.name == 'owned-state.json'
     ]
     assert owned_state_entries == ['skip']
+
+
+def test_install_with_auto_compact_percent_writes_env_override(
+    tmp_path: Path, repo_root
+) -> None:
+    home = tmp_path / 'claude-home'
+
+    install(repo_root, home, dry_run=False, auto_compact_percent=50)
+
+    settings = _read_settings(home)
+    assert settings['env']['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'] == '50'
+
+
+def test_install_without_auto_compact_flags_preserves_existing_env(
+    tmp_path: Path, repo_root
+) -> None:
+    home = tmp_path / 'claude-home'
+    home.mkdir()
+    (home / 'settings.json').write_text(
+        json.dumps({'env': {'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE': 'user-value'}}),
+        encoding='utf-8',
+    )
+
+    install(repo_root, home, dry_run=False)
+
+    settings = _read_settings(home)
+    assert settings['env']['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'] == 'user-value'
+
+
+def test_uninstall_restores_original_auto_compact_value(
+    tmp_path: Path, repo_root
+) -> None:
+    home = tmp_path / 'claude-home'
+    agentmaster_home = tmp_path / 'agentmaster-home'
+    home.mkdir()
+    (home / 'settings.json').write_text(
+        json.dumps({'env': {'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE': 'pre-existing'}}),
+        encoding='utf-8',
+    )
+
+    install(
+        repo_root,
+        home,
+        dry_run=False,
+        agentmaster_home=agentmaster_home,
+        auto_compact_percent=50,
+    )
+    uninstall(home, dry_run=False, agentmaster_home=agentmaster_home)
+
+    settings = _read_settings(home)
+    assert settings['env']['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'] == 'pre-existing'
+
+
+def test_uninstall_leaves_user_edited_auto_compact_value_alone(
+    tmp_path: Path, repo_root
+) -> None:
+    home = tmp_path / 'claude-home'
+    agentmaster_home = tmp_path / 'agentmaster-home'
+
+    install(
+        repo_root,
+        home,
+        dry_run=False,
+        agentmaster_home=agentmaster_home,
+        auto_compact_percent=50,
+    )
+    settings = _read_settings(home)
+    settings['env']['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'] = 'user-changed-it'
+    (home / 'settings.json').write_text(json.dumps(settings), encoding='utf-8')
+
+    uninstall(home, dry_run=False, agentmaster_home=agentmaster_home)
+
+    surviving = _read_settings(home)
+    assert surviving['env']['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'] == 'user-changed-it'
+
+
+def test_install_clear_auto_compact_override_restores_original(
+    tmp_path: Path, repo_root
+) -> None:
+    home = tmp_path / 'claude-home'
+    agentmaster_home = tmp_path / 'agentmaster-home'
+    home.mkdir()
+    (home / 'settings.json').write_text(
+        json.dumps({'env': {'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE': 'pre-existing'}}),
+        encoding='utf-8',
+    )
+
+    install(
+        repo_root,
+        home,
+        dry_run=False,
+        agentmaster_home=agentmaster_home,
+        auto_compact_percent=50,
+    )
+    install(
+        repo_root,
+        home,
+        dry_run=False,
+        agentmaster_home=agentmaster_home,
+        clear_auto_compact_override=True,
+    )
+
+    settings = _read_settings(home)
+    assert settings['env']['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'] == 'pre-existing'
