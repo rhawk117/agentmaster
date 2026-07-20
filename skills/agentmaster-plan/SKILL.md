@@ -24,7 +24,8 @@ Model check: state in your first message which model you are running on. If
 it is not the frontier model pinned in this skill's frontmatter, tell the
 user to run `/model <pin>` (or to confirm the current model is acceptable)
 before anything is dispatched — skill-level pins are best-effort on current
-CLI versions.
+CLI versions. Log any mismatch as a ledger entry so it's visible to review,
+not just to the user in this turn.
 
 Task to plan: $ARGUMENTS
 
@@ -70,6 +71,11 @@ Phase marker: before anything else, write the single word `plan` to
 cost-boundary hook exempts `.agentmaster/`. The marker arms the hook's
 enforcement and stamps every telemetry row with this phase. If the write is
 blocked (plan mode forbids workspace writes), continue without it.
+
+Plan mode note: if a subagent's read or write is blocked by the user-level
+secrets-guard hook (a false positive outside this repo's scope), recommend
+the user add the path to that hook's allowlist rather than routing around
+it — this is documentation, not a fix owned by this skill.
 
 ## Phase 1 — Frame
 
@@ -123,6 +129,12 @@ Dispatch rules:
   re-dispatch with a sharper question, never a look for yourself. A report
   arriving over the cap is not read past its contract sections — re-dispatch
   narrower.
+- Addressing convention: every mid-run correction names its target agent and
+  restates the task id — never "reply to both" when more than one agent is
+  running concurrently. An unaddressed correction is a message no agent will
+  reliably claim.
+- Waiting narration: while background agents run, a progress update names
+  which agents are still outstanding, not only which have finished.
 
 Report contract (paste into every dispatch):
 
@@ -131,11 +143,13 @@ Report contract (paste into every dispatch):
 > output line. INFERRED — each claim with the verified items it rests on.
 > UNKNOWN/BLOCKED — what you could not establish and why. Cite paths and line
 > numbers instead of pasting code; never include more than 5 consecutive
-> lines from any file. Before returning, save your complete raw evidence
-> (full outputs, full excerpts) to `.agentmaster/evidence/<question-slug>.md`
-> and cite that path in the report (if workspace writes are blocked, as in
-> plan mode, return the evidence inline and say so). End with
-> `Confidence: high|medium|low`.
+> lines from any file. Before returning, save this same graded report —
+> the VERIFIED/INFERRED/UNKNOWN sections and the Confidence line — to
+> `.agentmaster/evidence/<question-slug>.md`, followed by a raw appendix of
+> full outputs and excerpts; a raw dump with no graded sections is not a
+> valid save. Cite that path in the report (if workspace writes are
+> blocked, as in plan mode, return the evidence inline and say so). End
+> with `Confidence: high|medium|low`.
 
 Maintain an evidence ledger as reports return: numbered entries tagged
 verified / inferred / unknown, each with its source report. Every claim in the
@@ -149,6 +163,11 @@ re-hydrate by having a scout return it. In plan mode, workspace writes are
 forbidden except the plan file: keep the ledger in-context, embed it in the
 plan document, and make persisting `.agentmaster/ledger.md` and any
 deferred evidence files the first act of execution.
+
+Ledger freshness: any evidence file or task added after the last ledger
+persist is not yet citable. Give it the next ledger number and re-persist
+`.agentmaster/ledger.md` before the draft may cite ledger entries for it —
+citing an unpersisted number is a defect, not a shortcut.
 
 ## Fallback and escalation
 
@@ -170,6 +189,10 @@ deferred evidence files the first act of execution.
 
 ## Phase 3 — Draft
 
+Before drafting, verify every evidence file this draft will cite actually
+exists — one `ls` per cited path. A citation to a missing file is dropped
+or re-gathered; it never survives into the draft.
+
 Write a draft skeleton, not the final document:
 
 - Toolchain section: the verified test, lint, security-scan, and build
@@ -178,7 +201,9 @@ Write a draft skeleton, not the final document:
   decided between them.
 - Task list where each task carries: its dependencies on other tasks, the
   exact files it owns, and a concrete verification step (a command, not a
-  vibe).
+  vibe). Task text never embeds more than 5 consecutive verbatim lines from
+  a source file — point to file:line instead; a plan task is an
+  instruction, not a code dump.
 - Parallel groups: tasks with no dependency edges between them AND disjoint
   file ownership, grouped for simultaneous dispatch. Watch for hidden shared
   state that breaks disjointness — lockfiles, migrations, generated code,
@@ -228,6 +253,11 @@ Never accept or dismiss a finding without writing down why. Run at most two
 critique rounds, each with a fresh critic; stop early when a round produces no
 accepted findings.
 
+Re-critique trigger: any task added to the plan after the last critique
+round — including a task added to satisfy an accepted finding, or a late
+user scope addition — has not been adversarially checked. Give it one
+scoped re-critique pass, covering only what changed, before Phase 5.
+
 ## Phase 5 — Formalize
 
 Invoke the `writing-plans` skill (superpowers) on the revised skeleton.
@@ -238,6 +268,10 @@ resources sections,
 the execution contract, the closing review gate,
 and the Open Questions section. If writing-plans
 is unavailable, write the plan document yourself with that structure.
+
+Post-formalize lint: run `scripts/plan-structure-lint.sh <plan-file>` against
+the produced plan and reshape until it exits 0. A plan that fails the lint is
+not formalized yet.
 
 ## Output
 

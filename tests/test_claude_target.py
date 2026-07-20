@@ -74,7 +74,7 @@ def test_model_pin_only_in_plan_and_review(tmp_path: Path, repo_root) -> None:
     install(repo_root, home, model='opus', dry_run=False)
 
     pin = 'model: opus  # set by install.py'
-    for skill in ('agentmaster-plan', 'agentmaster-review'):
+    for skill in ('agentmaster-plan', 'agentmaster-review', 'agentmaster-retro'):
         text = (home / 'skills' / skill / 'SKILL.md').read_text(encoding='utf-8')
         assert pin in text
     execute = (home / 'skills' / 'agentmaster-execute' / 'SKILL.md').read_text(
