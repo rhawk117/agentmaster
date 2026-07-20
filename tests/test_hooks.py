@@ -98,7 +98,46 @@ def test_precompact_snapshot_copies_and_logs(tmp_path, run_hook):
     snapshots = list((am / 'compaction-snapshots').iterdir())
     assert len(snapshots) == 1
     assert (snapshots[0] / 'ledger.md').read_text() == 'evidence'
-    assert 'hook,precompact,,,\n' in (am / 'telemetry.md').read_text()
+    assert 'hook,precompact:main,,,\n' in (am / 'telemetry.md').read_text()
+
+
+def test_precompact_snapshot_labels_agent_type_and_tokens(tmp_path, run_hook):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'ledger.md').write_text('evidence')
+    payload = {'cwd': str(tmp_path), 'agent_type': 'implementer', 'pre_tokens': 12345}
+    result = run_hook('precompact_snapshot', payload)
+    assert result.returncode == 0
+    assert (am / 'telemetry.md').read_text() == 'hook,precompact:implementer,,12345,\n'
+
+
+def test_precompact_snapshot_two_calls_never_collide(tmp_path, run_hook):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'ledger.md').write_text('evidence')
+    payload = {'cwd': str(tmp_path)}
+    first = run_hook('precompact_snapshot', payload)
+    second = run_hook('precompact_snapshot', payload)
+    assert first.returncode == 0
+    assert second.returncode == 0
+    snapshots = sorted(p.name for p in (am / 'compaction-snapshots').iterdir())
+    assert len(snapshots) == 2
+    assert snapshots[0] != snapshots[1]
+    for name in snapshots:
+        snap = am / 'compaction-snapshots' / name
+        assert (snap / 'ledger.md').read_text() == 'evidence'
+    assert len((am / 'telemetry.md').read_text().splitlines()) == 2
+
+
+def test_precompact_snapshot_writes_debug_dump_when_enabled(tmp_path, run_hook):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'ledger.md').write_text('evidence')
+    payload = {'cwd': str(tmp_path), 'trigger': 'auto'}
+    env = {**os.environ, 'AGENTMASTER_HOOK_DEBUG': '1'}
+    result = run_hook('precompact_snapshot', payload, env=env)
+    assert result.returncode == 0
+    assert '"trigger": "auto"' in (am / 'hook-debug.jsonl').read_text()
 
 
 def test_session_context_emits_pointer(tmp_path, run_hook):

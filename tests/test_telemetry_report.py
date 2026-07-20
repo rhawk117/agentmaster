@@ -149,6 +149,21 @@ def test_prune_removes_stale_phase_marker(tmp_path):
 
 
 @pytest.mark.subprocess
+def test_report_distinguishes_precompact_agent_labels(tmp_path):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'telemetry.md').write_text(
+        'hook,precompact:main,,5000,\nhook,precompact:implementer,,1200,\n'
+    )
+
+    result = _run_report(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert 'precompact:main' in result.stdout
+    assert 'precompact:implementer' in result.stdout
+
+
+@pytest.mark.subprocess
 def test_report_missing_file_exits_one(tmp_path):
     result = _run_report(tmp_path)
 

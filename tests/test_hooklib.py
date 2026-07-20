@@ -95,3 +95,65 @@ def test_read_payload_non_dict_json_returns_empty(monkeypatch):
     for raw in ('[1, 2]', '"scout"', '42', 'null'):
         monkeypatch.setattr(sys, 'stdin', io.StringIO(raw))
         assert hooklib.read_payload() == {}
+
+
+def test_compaction_context_defaults_when_payload_bare():
+    ctx = hooklib.compaction_context({})
+    assert ctx.agent_type == 'main'
+    assert ctx.trigger == ''
+    assert ctx.threshold_percent == ''
+    assert ctx.pre_tokens == ''
+    assert ctx.post_tokens == ''
+    assert ctx.session_id == ''
+
+
+def test_compaction_context_distinguishes_implementer():
+    ctx = hooklib.compaction_context({'agent_type': 'implementer'})
+    assert ctx.agent_type == 'implementer'
+
+
+def test_compaction_context_distinguishes_other_subagent():
+    ctx = hooklib.compaction_context({'agent_name': 'scout'})
+    assert ctx.agent_type == 'scout'
+
+
+def test_compaction_context_extracts_trigger_and_threshold():
+    ctx = hooklib.compaction_context({'trigger': 'auto', 'threshold_percent': 50})
+    assert ctx.trigger == 'auto'
+    assert ctx.threshold_percent == '50'
+
+
+def test_compaction_context_extracts_threshold_alt_key():
+    ctx = hooklib.compaction_context({'auto_compact_percent': 75})
+    assert ctx.threshold_percent == '75'
+
+
+def test_compaction_context_extracts_tokens():
+    ctx = hooklib.compaction_context({'pre_tokens': 9000, 'post_tokens': 500})
+    assert ctx.pre_tokens == '9000'
+    assert ctx.post_tokens == '500'
+
+
+def test_compaction_context_extracts_tokens_alt_keys():
+    ctx = hooklib.compaction_context({'tokens_before': 111, 'tokens_after': 22})
+    assert ctx.pre_tokens == '111'
+    assert ctx.post_tokens == '22'
+
+
+def test_compaction_context_extracts_session_identifier():
+    ctx = hooklib.compaction_context({'session_id': 'sess-1'})
+    assert ctx.session_id == 'sess-1'
+
+
+def test_compaction_context_falls_back_to_agent_id_for_session():
+    ctx = hooklib.compaction_context({'agent_id': 'agent-9'})
+    assert ctx.session_id == 'agent-9'
+
+
+def test_compaction_context_fails_open_on_malformed_values():
+    class Boom:
+        def __bool__(self):
+            raise RuntimeError('boom')
+
+    ctx = hooklib.compaction_context({'agent_type': Boom()})
+    assert ctx.agent_type == 'main'

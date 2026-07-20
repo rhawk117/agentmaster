@@ -182,7 +182,11 @@ The hook layer owns all telemetry rows: it appends
 marker the coordinator skills set and clear at phase boundaries (`hook` when
 none is active), the model and tokens from the payload or the subagent
 transcript where the platform reports them, and the wall-clock duration from
-a start/stop timestamp pair. The skills never hand-append rows. Read the
+a start/stop timestamp pair. `PreCompact` rows use the agent column to
+distinguish who compacted: `precompact:main` for the primary session,
+`precompact:implementer` and `precompact:<subagent>` otherwise, with the
+pre-compaction token count in the tokens column when the provider supplies
+it. The skills never hand-append rows. Read the
 running totals per agent, phase, and model with `make telemetry` (or `uv run
 python scripts/telemetry_report.py`). Prune with `make clean-telemetry`: it
 keeps the newest 500 lines and 5 compaction snapshots and drops `.starts`
@@ -224,8 +228,10 @@ worker dispatch into the telemetry file described above, so telemetry no
 longer depends on the orchestrator remembering; a `PreToolUse` guard on the
 `Agent`/`Task` tools blocks all dispatch while `CLAUDE_CODE_SUBAGENT_MODEL`
 is exported, since that variable silently defeats the tiering; `PreCompact`
-snapshots `.agentmaster/` into `.agentmaster/compaction-snapshots/` before
-compaction; and `SessionStart` injects a re-hydration pointer whenever a
+snapshots `.agentmaster/` into a fresh, uniquely named directory under
+`.agentmaster/compaction-snapshots/` before every compaction, so same-second
+or overlapping compactions never merge or overwrite each other's history;
+and `SessionStart` injects a re-hydration pointer whenever a
 project carries agentmaster artifacts. The coordinator skills additionally
 carry a frontmatter `PreToolUse` cost-boundary hook, armed only while
 `.agentmaster/.phase` names a phase. All scripts parse hook JSON
