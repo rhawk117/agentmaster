@@ -17,7 +17,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "--strict-markers"
+addopts = ["--strict-config", "--strict-markers", "-ra"]
+xfail_strict = true
+filterwarnings = ["error"]
 markers = [
-    "subprocess: test spawns Python subprocesses (slower; deselect with -m 'not subprocess')",
+    "subprocess: spawns a local child process",
+    "integration: crosses a CLI and installer/filesystem boundary",
+    "sqlite: exercises a real SQLite database",
 ]

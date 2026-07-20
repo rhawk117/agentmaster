@@ -77,9 +77,23 @@ run_test() {
     fi
     log_step_end
 
-    log_step "pytest"
-    if ! uv run python -m pytest tests/; then
-        log_error "Tests failed"
+    log_step "pytest (unit: not subprocess and not integration)"
+    if ! uv run python -m pytest -m "not subprocess and not integration" tests/; then
+        log_error "Unit tests failed"
+        failed=1
+    fi
+    log_step_end
+
+    log_step "pytest (subprocess: subprocess and not integration)"
+    if ! uv run python -m pytest -m "subprocess and not integration" tests/; then
+        log_error "Subprocess tests failed"
+        failed=1
+    fi
+    log_step_end
+
+    log_step "pytest (integration)"
+    if ! uv run python -m pytest -m integration tests/; then
+        log_error "Integration tests failed"
         failed=1
     fi
     log_step_end

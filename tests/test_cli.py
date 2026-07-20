@@ -51,6 +51,7 @@ def test_cli_validate_drift_exits_one(repo_copy, run_cli):
 
 
 @pytest.mark.subprocess
+@pytest.mark.integration
 def test_cli_sync_is_idempotent_on_clean_tree(repo_copy, run_cli):
     result = run_cli(['sync'], cwd=repo_copy)
 
@@ -134,6 +135,7 @@ def test_cli_rejects_auto_compact_percent_out_of_range(run_cli, repo_root):
 
 
 @pytest.mark.subprocess
+@pytest.mark.integration
 def test_cli_install_auto_compact_percent_writes_env_override(
     tmp_path, run_cli, repo_root
 ):
@@ -227,6 +229,7 @@ def test_cli_install_dry_run_creates_no_ledger(tmp_path, run_cli, repo_root):
 
 
 @pytest.mark.subprocess
+@pytest.mark.integration
 def test_cli_install_no_ledger_creates_no_ledger_file(tmp_path, run_cli, repo_root):
     agentmaster_home = tmp_path / 'agentmaster-home'
 
@@ -249,6 +252,7 @@ def test_cli_install_no_ledger_creates_no_ledger_file(tmp_path, run_cli, repo_ro
 
 
 @pytest.mark.subprocess
+@pytest.mark.integration
 def test_cli_install_ledger_path_and_artifact_dir_are_resolved(
     tmp_path, run_cli, repo_root
 ):
