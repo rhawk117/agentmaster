@@ -11,12 +11,12 @@ config that participates in the same classify/backup/dry-run pass.
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from installer.actions import FilePlan, apply_plans, remove_paths
+from installer.frontmatter import update_frontmatter
 from installer.manifest import MANIFEST
 from installer.render import render_worker
 
@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 
     from installer.actions import InstallReport
     from installer.manifest import Manifest
-
-_MODEL_LINE = re.compile(r'(?m)^model: .*$')
 
 
 def default_home() -> Path:
@@ -71,7 +69,7 @@ def _coordinator_plans(
     for coordinator in manifest.copilot_coordinators:
         source = root / 'copilot' / 'agents' / f'{coordinator}.agent.md'
         text = source.read_text(encoding='utf-8')
-        repinned = _MODEL_LINE.sub(lambda _: f'model: {model}', text)
+        repinned = update_frontmatter(text, {'model': model})
         plans.append(
             FilePlan(
                 content=repinned,

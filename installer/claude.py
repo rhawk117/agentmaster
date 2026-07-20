@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from installer.actions import FilePlan, apply_plans, remove_paths
+from installer.frontmatter import update_frontmatter
 from installer.manifest import MANIFEST, Manifest
 from installer.render import render_worker
 
@@ -50,16 +51,6 @@ def _preflight(root: Path, manifest: Manifest) -> None:
         raise FileNotFoundError('missing installer sources: ' + ', '.join(missing))
 
 
-def _pin_model(content: str, model: str) -> str:
-    lines = content.splitlines(keepends=True)
-    for index, line in enumerate(lines):
-        if line.startswith('model: '):
-            newline = '\n' if line.endswith('\n') else ''
-            lines[index] = f'model: {model}  # set by install.py{newline}'
-            break
-    return ''.join(lines)
-
-
 def _skill_plans(
     root: Path, home: Path, model: str, manifest: Manifest
 ) -> list[FilePlan]:
@@ -73,7 +64,9 @@ def _skill_plans(
             if src.name == 'SKILL.md':
                 content = content.replace(_COST_BOUNDARY_SOURCE, boundary)
                 if skill in _MODEL_SKILLS:
-                    content = _pin_model(content, model)
+                    content = update_frontmatter(
+                        content, {'model': f'{model}  # set by install.py'}
+                    )
             relative = src.relative_to(src_dir)
             plans.append(
                 FilePlan(content=content, destination=home / 'skills' / skill / relative)

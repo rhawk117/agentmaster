@@ -8,9 +8,13 @@ variants.
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
+from installer.frontmatter import update_frontmatter
 from installer.manifest import MANIFEST, Manifest
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 Platform = Literal['claude', 'copilot']
 
@@ -37,11 +41,14 @@ def render_worker(
     platform: Platform,
     manifest: Manifest = MANIFEST,
     root: Path | None = None,
+    overrides: Mapping[str, str] | None = None,
 ) -> str:
     """Return the full generated file content for one worker on one platform.
 
     Bodies come from `root/shared/agents/`; `root` defaults to the repository
-    that contains this module.
+    that contains this module. `overrides` applies role-specific allow-listed
+    frontmatter scalars (see `installer.frontmatter`) to this render only —
+    the frozen `manifest` is never mutated.
     """
     frontmatter = (
         manifest.claude_frontmatter
@@ -49,7 +56,10 @@ def render_worker(
         else manifest.copilot_frontmatter
     )[name]
     body = _body(name, platform, manifest, root or _DEFAULT_ROOT)
-    return f'---\n{frontmatter}---\n\n{_marker(name)}\n\n{body}\n'
+    rendered = f'---\n{frontmatter}---\n\n{_marker(name)}\n\n{body}\n'
+    if overrides:
+        rendered = update_frontmatter(rendered, overrides)
+    return rendered
 
 
 def generated_path(name: str, platform: Platform, root: Path) -> Path:
