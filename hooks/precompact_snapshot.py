@@ -33,7 +33,7 @@ def main() -> int:
             copy = shutil.copytree if p.is_dir() else shutil.copy2
             copy(p, dst / p.name)
         ctx = hooklib.compaction_context(payload)
-        hooklib.append_telemetry(payload, f'precompact:{ctx.agent_type}', ctx.pre_tokens)
+        hooklib.append_telemetry(payload, f'precompact:{ctx.agent_type}', ctx.token_count)
     return 0
 
 

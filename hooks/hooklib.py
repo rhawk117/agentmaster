@@ -64,9 +64,7 @@ class CompactionContext(NamedTuple):
 
     agent_type: str
     trigger: str
-    threshold_percent: str
-    pre_tokens: str
-    post_tokens: str
+    token_count: str
     session_id: str
 
 
@@ -82,20 +80,12 @@ def compaction_context(payload: dict[str, Any]) -> CompactionContext:
                 payload.get('agent_type') or payload.get('agent_name') or 'main'
             ),
             trigger=str(payload.get('trigger') or ''),
-            threshold_percent=str(
-                payload.get('threshold_percent')
-                or payload.get('auto_compact_percent')
-                or ''
-            ),
-            pre_tokens=str(
-                payload.get('pre_tokens') or payload.get('tokens_before') or ''
-            ),
-            post_tokens=str(
-                payload.get('post_tokens') or payload.get('tokens_after') or ''
+            token_count=str(
+                payload.get('token_count') or payload.get('pre_tokens') or ''
             ),
             session_id=str(payload.get('session_id') or payload.get('agent_id') or ''),
         )
-    return CompactionContext('main', '', '', '', '', '')
+    return CompactionContext('main', '', '', '')
 
 
 def tool_name(payload: dict[str, Any]) -> str:

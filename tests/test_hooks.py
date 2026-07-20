@@ -104,7 +104,7 @@ def test_precompact_snapshot_labels_agent_type_and_tokens(tmp_path, run_hook):
     am = tmp_path / '.agentmaster'
     am.mkdir()
     (am / 'ledger.md').write_text('evidence')
-    payload = {'cwd': str(tmp_path), 'agent_type': 'implementer', 'pre_tokens': 12345}
+    payload = {'cwd': str(tmp_path), 'agent_type': 'implementer', 'token_count': 12345}
     result = run_hook('precompact_snapshot', payload)
     assert result.returncode == 0
     assert (am / 'telemetry.md').read_text() == 'hook,precompact:implementer,,12345,\n'
