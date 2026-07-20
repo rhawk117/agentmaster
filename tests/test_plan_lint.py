@@ -153,7 +153,7 @@ none
 
 def _run_lint(script: Path, plan_file: Path) -> subprocess.CompletedProcess:
     return subprocess.run(  # noqa: S603
-        [str(script), str(plan_file)],
+        ['bash', str(script), str(plan_file)],  # noqa: S607
         capture_output=True,
         text=True,
         timeout=30,
