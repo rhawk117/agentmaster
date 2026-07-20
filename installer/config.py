@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 SCHEMA_VERSION = 1
 MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 DEFAULT_AGENTMASTER_HOME = Path.home() / '.agentmaster'
-DEFAULT_MODEL: Mapping[Target, str] = {}  # populated below Target definition
 
 
 class Target(StrEnum):
@@ -37,7 +36,46 @@ class Target(StrEnum):
         return (Target.CLAUDE, Target.COPILOT) if self is Target.ALL else (self,)
 
 
-DEFAULT_MODEL = {Target.CLAUDE: 'opus', Target.COPILOT: 'claude-opus-4.8'}
+class Role(StrEnum):
+    """An Agentmaster runtime role, independently configurable (SPEC.md §11.1)."""
+
+    COORDINATOR = 'coordinator'
+    ORCHESTRATOR = 'orchestrator'
+    IMPLEMENTER = 'implementer'
+    REVIEWER = 'reviewer'
+
+
+class Effort(StrEnum):
+    """A supported reasoning-effort level for a Claude role."""
+
+    LOW = 'low'
+    MEDIUM = 'medium'
+    HIGH = 'high'
+    XHIGH = 'xhigh'
+    MAX = 'max'
+
+
+# Recommended defaults (SPEC.md §11.1). Copilot has no orchestrator/reviewer
+# flags and never gets an effort field.
+DEFAULT_ROLE_MODEL: Mapping[tuple[Target, Role], str] = {
+    (Target.CLAUDE, Role.COORDINATOR): 'opus',
+    (Target.CLAUDE, Role.ORCHESTRATOR): 'sonnet',
+    (Target.CLAUDE, Role.IMPLEMENTER): 'sonnet',
+    (Target.CLAUDE, Role.REVIEWER): 'opus',
+    (Target.COPILOT, Role.COORDINATOR): 'claude-opus-4.8',
+    (Target.COPILOT, Role.IMPLEMENTER): 'claude-sonnet-4.6',
+}
+DEFAULT_ROLE_EFFORT: Mapping[Role, Effort] = {
+    Role.ORCHESTRATOR: Effort.MEDIUM,
+    Role.IMPLEMENTER: Effort.MEDIUM,
+    Role.REVIEWER: Effort.HIGH,
+}
+ROLE_RATIONALE: Mapping[Role, str] = {
+    Role.COORDINATOR: 'planning and architectural judgment',
+    Role.ORCHESTRATOR: 'persistent control work, not final review',
+    Role.IMPLEMENTER: 'plans contain hard decisions; worker executes',
+    Role.REVIEWER: 'independent correctness and safety gate',
+}
 
 
 class DeliveryMode(StrEnum):
@@ -79,17 +117,58 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class RoleOverride:
+    """A resolved model — and, where the role supports it, effort — for one role."""
+
+    model: str
+    effort: Effort | None = None
+
+    def frontmatter_fields(self) -> dict[str, str]:
+        """Allow-listed frontmatter overrides for `installer.frontmatter`."""
+        fields = {'model': self.model}
+        if self.effort is not None:
+            fields['effort'] = self.effort.value
+        return fields
+
+
+@dataclass(frozen=True, slots=True)
 class UnresolvedConfig:
     """Raw installer inputs, one field per CLI flag, before precedence applies."""
 
     target: Target
     dry_run: bool = False
     no_input: bool = False
-    model: str | None = None
     claude_dir: Path | None = None
     copilot_dir: Path | None = None
     config_path: Path | None = None
     agentmaster_home: Path | None = None
+    claude_model: str | None = None
+    copilot_model: str | None = None
+    claude_orchestrator_model: str | None = None
+    claude_orchestrator_effort: Effort | None = None
+    claude_implementer_model: str | None = None
+    claude_implementer_effort: Effort | None = None
+    claude_review_model: str | None = None
+    claude_review_effort: Effort | None = None
+    copilot_implementer_model: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ClaudeRoleConfig:
+    """Resolved Claude role configuration for one install."""
+
+    coordinator_model: str
+    orchestrator: RoleOverride
+    implementer: RoleOverride
+    reviewer: RoleOverride
+
+
+@dataclass(frozen=True, slots=True)
+class CopilotRoleConfig:
+    """Resolved Copilot role configuration for one install."""
+
+    coordinator_model: str
+    implementer_model: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,22 +284,69 @@ def resolve(
     )
 
 
-def resolve_model(
+_CLAUDE_TARGET_FIELDS = (
+    'claude_model',
+    'claude_orchestrator_model',
+    'claude_orchestrator_effort',
+    'claude_implementer_model',
+    'claude_implementer_effort',
+    'claude_review_model',
+    'claude_review_effort',
+)
+_COPILOT_TARGET_FIELDS = ('copilot_model', 'copilot_implementer_model')
+
+
+def validate_role_flags(unresolved: UnresolvedConfig) -> None:
+    """Reject a role/target-specific flag when its target isn't selected.
+
+    Raises
+    ------
+    ConfigError
+        A `--claude-*` flag was given without `claude` selected, or a
+        `--copilot-*` flag was given without `copilot` selected.
+    """
+    targets = set(unresolved.target.expand())
+    if Target.CLAUDE not in targets:
+        _reject_present(unresolved, _CLAUDE_TARGET_FIELDS, 'claude')
+    if Target.COPILOT not in targets:
+        _reject_present(unresolved, _COPILOT_TARGET_FIELDS, 'copilot')
+
+
+def _reject_present(
+    unresolved: UnresolvedConfig, field_names: tuple[str, ...], target_name: str
+) -> None:
+    for name in field_names:
+        if getattr(unresolved, name) is not None:
+            flag = f'--{name.replace("_", "-")}'
+            raise ConfigError(flag, f'requires --target {target_name} or all')
+
+
+def resolve_role(
+    role: Role,
     target: Target,
-    unresolved: UnresolvedConfig,
     *,
+    explicit_model: str | None,
+    explicit_effort: Effort | None,
+    no_input: bool,
     is_tty: bool,
-    prompt: Callable[[Target], str] | None = None,
-) -> str:
-    """Resolve the model for `target`: explicit flag, else prompt, else default.
+    prompt: Callable[[Role, Target, str, Effort | None], tuple[str, Effort | None]]
+    | None = None,
+) -> RoleOverride:
+    """Resolve one role's model (and effort, where supported): explicit flag,
+    else prompt, else the recommended default (SPEC.md §11.1).
 
     `is_tty` and `prompt` are explicit collaborators (not `sys.stdin.isatty()`
     or `input()` called internally) so tests drive both branches without a
-    real terminal. `--no-input` and a non-interactive `is_tty=False` both
+    real terminal. `no_input` and a non-interactive `is_tty=False` both
     suppress prompting.
     """
-    if unresolved.model:
-        return unresolved.model
-    if is_tty and not unresolved.no_input and prompt is not None:
-        return prompt(target)
-    return DEFAULT_MODEL[target]
+    default_model = DEFAULT_ROLE_MODEL[(target, role)]
+    default_effort = DEFAULT_ROLE_EFFORT.get(role)
+    if explicit_model or explicit_effort:
+        model = explicit_model or default_model
+        effort = explicit_effort or default_effort
+        return RoleOverride(model=model, effort=effort)
+    if is_tty and not no_input and prompt is not None:
+        model, effort = prompt(role, target, default_model, default_effort)
+        return RoleOverride(model=model, effort=effort)
+    return RoleOverride(model=default_model, effort=default_effort)

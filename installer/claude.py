@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from installer.actions import FilePlan, apply_plans, remove_paths
+from installer.config import ClaudeRoleConfig, Role
 from installer.frontmatter import update_frontmatter
 from installer.manifest import MANIFEST, Manifest
 from installer.render import render_worker
@@ -22,9 +23,25 @@ from installer.render import render_worker
 if TYPE_CHECKING:
     from installer.actions import InstallReport
 
-_MODEL_SKILLS = frozenset({'agentmaster-plan', 'agentmaster-review', 'agentmaster-retro'})
+_SKILL_ROLE = {
+    'agentmaster-plan': Role.COORDINATOR,
+    'agentmaster-retro': Role.COORDINATOR,
+    'agentmaster-execute': Role.ORCHESTRATOR,
+    'agentmaster-review': Role.REVIEWER,
+}
 _COST_BOUNDARY_SOURCE = 'python3 "$HOME/.claude/agentmaster/hooks/cost_boundary.py"'
 _ROSTER = '^(scout|code-analyst|plan-critic|implementer|Explore)$'
+
+
+def _skill_overrides(skill: str, roles: ClaudeRoleConfig) -> dict[str, str] | None:
+    role = _SKILL_ROLE.get(skill)
+    if role is Role.COORDINATOR:
+        return {'model': roles.coordinator_model}
+    if role is Role.ORCHESTRATOR:
+        return roles.orchestrator.frontmatter_fields()
+    if role is Role.REVIEWER:
+        return roles.reviewer.frontmatter_fields()
+    return None
 
 
 def default_home() -> Path:
@@ -52,21 +69,20 @@ def _preflight(root: Path, manifest: Manifest) -> None:
 
 
 def _skill_plans(
-    root: Path, home: Path, model: str, manifest: Manifest
+    root: Path, home: Path, roles: ClaudeRoleConfig, manifest: Manifest
 ) -> list[FilePlan]:
     interpreter = _interpreter()
     boundary = f'"{interpreter}" "{home.as_posix()}/agentmaster/hooks/cost_boundary.py"'
     plans: list[FilePlan] = []
     for skill in manifest.claude_skills:
         src_dir = root / 'skills' / skill
+        overrides = _skill_overrides(skill, roles)
         for src in sorted(p for p in src_dir.rglob('*') if p.is_file()):
             content = src.read_text(encoding='utf-8')
             if src.name == 'SKILL.md':
                 content = content.replace(_COST_BOUNDARY_SOURCE, boundary)
-                if skill in _MODEL_SKILLS:
-                    content = update_frontmatter(
-                        content, {'model': f'{model}  # set by install.py'}
-                    )
+                if overrides:
+                    content = update_frontmatter(content, overrides)
             relative = src.relative_to(src_dir)
             plans.append(
                 FilePlan(content=content, destination=home / 'skills' / skill / relative)
@@ -74,10 +90,15 @@ def _skill_plans(
     return plans
 
 
-def _agent_plans(root: Path, home: Path, manifest: Manifest) -> list[FilePlan]:
+def _agent_plans(
+    root: Path, home: Path, roles: ClaudeRoleConfig, manifest: Manifest
+) -> list[FilePlan]:
     plans: list[FilePlan] = []
     for worker in manifest.workers:
-        text = render_worker(worker, 'claude', manifest, root)
+        overrides = (
+            roles.implementer.frontmatter_fields() if worker == 'implementer' else None
+        )
+        text = render_worker(worker, 'claude', manifest, root, overrides=overrides)
         plans.append(FilePlan(content=text, destination=home / 'agents' / f'{worker}.md'))
     for agent in manifest.claude_only_agents:
         content = (root / 'agents' / f'{agent}.md').read_text(encoding='utf-8')
@@ -176,7 +197,7 @@ def install(
     root: Path,
     home: Path,
     *,
-    model: str,
+    roles: ClaudeRoleConfig,
     dry_run: bool,
     manifest: Manifest = MANIFEST,
 ) -> InstallReport:
@@ -187,8 +208,8 @@ def install(
     if settings_path.exists():
         _load_settings(settings_path)  # fail closed before any file is written
     plans = [
-        *_skill_plans(root, home, model, manifest),
-        *_agent_plans(root, home, manifest),
+        *_skill_plans(root, home, roles, manifest),
+        *_agent_plans(root, home, roles, manifest),
         *_hook_plans(root, home, manifest),
     ]
     report = apply_plans(plans, backup_root=home, dry_run=dry_run)

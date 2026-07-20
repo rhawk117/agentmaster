@@ -3,6 +3,7 @@ name: agentmaster-review
 description: Cost-tiered adversarial code review. Use after implementer subagents complete a agentmaster-plan plan (the plan's review gate invokes this), or whenever the user wants a rigorous review of a diff, branch, PR, or recent changes. Works from the assumption that the code is bad — poorly implemented, doesn't scale, violates YAGNI, SOLID, or DRY, is hard to test, badly structured, or insecure — and makes it prove otherwise with evidence. Keeps frontier reasoning for adjudication only: dispatches scout (haiku) and code-analyst (sonnet) for all evidence, then approves or emits fix tasks and dispatches implementers. Trigger on "review the changes", "review this diff", "review this branch", or as the final task of an executed plan.
 argument-hint: "[ref range, branch, or plan path — defaults to changes vs the default-branch merge-base]"
 model: opus  # resolves to Claude Opus 4.8; org disables fable — swap back to `fable` if that changes
+effort: high
 hooks:
   PreToolUse:
     - matcher: "Read|Grep|Glob|Bash|WebFetch|WebSearch|Edit|Write|NotebookEdit"

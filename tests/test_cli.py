@@ -57,14 +57,43 @@ def test_cli_sync_is_idempotent_on_clean_tree(repo_copy, run_cli):
 
 
 @pytest.mark.subprocess
-def test_cli_rejects_invalid_model(run_cli, repo_root):
+def test_cli_rejects_removed_model_flag(run_cli, repo_root):
     result = run_cli(
-        ['install', '--target', 'claude', '--model', 'bad model!', '--dry-run'],
+        ['install', '--target', 'claude', '--model', 'opus', '--dry-run'],
+        cwd=repo_root,
+    )
+
+    assert result.returncode != 0
+    assert '--claude-model' in (result.stdout + result.stderr)
+
+
+@pytest.mark.subprocess
+def test_cli_rejects_invalid_role_model(run_cli, repo_root):
+    result = run_cli(
+        ['install', '--target', 'claude', '--claude-model', 'bad model!', '--dry-run'],
         cwd=repo_root,
     )
 
     assert result.returncode != 0
     assert 'model' in (result.stdout + result.stderr).lower()
+
+
+@pytest.mark.subprocess
+def test_cli_rejects_claude_flag_without_claude_target(run_cli, repo_root):
+    result = run_cli(
+        [
+            'install',
+            '--target',
+            'copilot',
+            '--claude-implementer-model',
+            'sonnet',
+            '--dry-run',
+        ],
+        cwd=repo_root,
+    )
+
+    assert result.returncode != 0
+    assert '--claude-implementer-model' in (result.stdout + result.stderr)
 
 
 @pytest.mark.subprocess
