@@ -6,8 +6,6 @@ that places skill trees, rendered worker agents, and the lifecycle hooks, then
 an idempotent merge of the five agentmaster hook events into `settings.json`.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import shutil

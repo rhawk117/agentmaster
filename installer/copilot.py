@@ -9,8 +9,6 @@ router-skill trees under `home/skills/`, the 4 hook scripts under
 config that participates in the same classify/backup/dry-run pass.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import re

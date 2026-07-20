@@ -13,21 +13,9 @@ Destinations honor `CLAUDE_CONFIG_DIR` / `COPILOT_CONFIG_DIR` and the
 Exit code is 0 on success, 1 on any failure or validation finding.
 """
 
-from __future__ import annotations
-
-import sys
-
-# Runtime guard for interpreters below requires-python; keep despite UP036.
-if sys.version_info < (3, 14):  # noqa: UP036
-    sys.stderr.write(
-        'agentmaster installer requires Python 3.14+ (running '
-        f'{sys.version_info.major}.{sys.version_info.minor}). '
-        'Run it with a newer interpreter, e.g.: uv run python install.py ...\n'
-    )
-    raise SystemExit(1)
-
 import argparse
 import re
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 

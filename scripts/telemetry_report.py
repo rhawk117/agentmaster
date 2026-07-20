@@ -9,8 +9,6 @@ With `--prune`, trims old telemetry lines, compaction snapshots, and stale
 session-start and phase markers.
 """
 
-from __future__ import annotations
-
 import argparse
 import shutil
 import sys
