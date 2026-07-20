@@ -6,8 +6,6 @@ each file atomically (temp file + `os.replace`). `dry_run` performs the
 classification and reporting only.
 """
 
-from __future__ import annotations
-
 import os
 import shutil
 import tempfile
