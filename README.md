@@ -164,6 +164,29 @@ orphans and a stale `.phase` marker older than a day (`--keep-lines`,
 automatically. The hooks only ever append, so pruning is always an explicit
 choice.
 
+## Retro loop
+
+`/agentmaster-retro` is a fourth skill alongside `agentmaster-plan`,
+`agentmaster-execute`, and `agentmaster-review` (opus-pinned,
+`disable-model-invocation`, so it never auto-fires) that closes a recursive
+analyze-fix-verify loop over the suite's own accumulated artifacts, rather
+than over a single task. Its corpus is fixed by convention: `.transcripts/`
+(prose only — code files inside it are never read), root-level run artifacts
+(run transcripts, generated docs), `.agentmaster/telemetry.md`, and every
+prior `.agentmaster/retro/*.md`. A `scout` inventories the corpus,
+`code-analyst` grades each artifact against a rubric in
+`criteria/retro-criteria.md` — marking each finding
+ALREADY-FIXED/PARTIALLY-FIXED/UNFIXED against current skill text — using the
+same injected-between-markers pattern `criteria/review-criteria.md` uses,
+kept in sync by `python install.py sync`/`validate`. It ranks the weaknesses,
+dispatches `implementer` fixes verified by `scripts/plan-structure-lint.sh`
+and the full quality gate, and writes a dated report to
+`.agentmaster/retro/<date>-<slug>.md` so the next run picks up where the last
+one left off; each subsequent pipeline run deposits new transcripts, so
+re-running `agentmaster-retro` closes the loop. `evals/evals.json` carries a
+seeded-flaw fixture (`evals/fixtures/flawed-retro-corpus/`) exercising the
+loop end to end, schema-checked in CI by `tests/test_evals.py`.
+
 ## Claude Code hook layer
 
 Five lifecycle hooks convert protocol into mechanism, unique to Claude Code.
@@ -230,7 +253,7 @@ re-tag.
 > as "Residual:". Read those before assuming a weakness is fully closed.
 
 1. Prose-only cost boundary (Claude Code) → default-on `PreToolUse` hooks in
-   all three skills run `cost_boundary.py`, which blocks
+   all four skills run `cost_boundary.py`, which blocks
    Read/Grep/Glob/Bash/Web/Edit/Write in the main thread with a delegation
    reminder (execute keeps Read for the plan file). The hook is armed only
    while `.agentmaster/.phase` names a phase — the skills set the marker at
@@ -273,10 +296,12 @@ re-tag.
    cost appendix, but no phase hand-appends rows. Tuning `maxTurns` and
    model pins is done from that file, not by feel. Residual: Copilot
    reports per-request multipliers via `/usage`, not per-subagent tokens.
-10. No evals → `evals/evals.json` ships five cross-stack cases (JS/TS plan,
-    headless Go plan, execution chain, seeded-flaw review, trigger-gating)
-    with objective assertions, ready for the skill-creator run loop in
-    Claude Code. Residual: authored, not yet executed at scale; run them.
+10. No evals → `evals/evals.json` ships eight cross-stack cases (JS/TS plan,
+    headless Go plan, execution chain, seeded-flaw review, trigger-gating,
+    proportionality triage, a seeded-flaw retro run, and the plan-structure
+    lint) with objective assertions, schema-validated in CI by
+    `tests/test_evals.py` — the first automated consumer of `evals/`.
+    Residual: schema-checked, not yet executed at scale; run them.
 11. Interactive-only seams → headless mode in every phase: `--headless` (or a
     non-interactive session) replaces questions with ASSUMED
     least-destructive defaults recorded in Open Questions, or a machine-

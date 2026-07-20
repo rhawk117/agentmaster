@@ -157,6 +157,19 @@ def test_validate_detects_criteria_drift(repo_copy):
     assert any('agentmaster-review/SKILL.md' in f for f in findings)
 
 
+def test_validate_detects_retro_criteria_drift(repo_copy):
+    assert validate(repo_copy) == []
+
+    target = repo_copy / 'skills' / 'agentmaster-retro' / 'SKILL.md'
+    text = target.read_text(encoding='utf-8')
+    start = '<!-- agentmaster:criteria:start -->'
+    target.write_text(text.replace(start, start + '\ninjected drift line'))
+
+    findings = validate(repo_copy)
+
+    assert any('agentmaster-retro/SKILL.md' in f for f in findings)
+
+
 def test_validate_detects_missing_shared_body(repo_copy):
     (repo_copy / 'shared' / 'agents' / 'scout.md').unlink()
 
