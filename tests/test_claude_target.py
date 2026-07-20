@@ -6,8 +6,17 @@ from pathlib import Path
 
 import pytest
 
-from installer.claude import default_home, install, uninstall
-from installer.config import ClaudeRoleConfig, Effort, RoleOverride
+from installer.claude import default_home
+from installer.claude import install as _claude_install
+from installer.claude import uninstall as _claude_uninstall
+from installer.config import (
+    ClaudeRoleConfig,
+    DeliveryMode,
+    Effort,
+    RawCapture,
+    RedactionMode,
+    RoleOverride,
+)
 from installer.render import render_worker
 
 
@@ -26,6 +35,31 @@ def _roles(
         orchestrator=RoleOverride(model=orchestrator, effort=orchestrator_effort),
         implementer=RoleOverride(model=implementer, effort=implementer_effort),
         reviewer=RoleOverride(model=reviewer, effort=reviewer_effort),
+    )
+
+
+def install(
+    root, home, *, roles=None, dry_run=False, manifest=None, agentmaster_home=None
+):
+    kwargs = {} if manifest is None else {'manifest': manifest}
+    return _claude_install(
+        root,
+        home,
+        roles=roles or _roles(),
+        agentmaster_home=agentmaster_home or (home.parent / 'agentmaster-home'),
+        delivery_mode=DeliveryMode.LOCAL,
+        raw_capture=RawCapture.FAILURES,
+        redaction=RedactionMode.STANDARD,
+        dry_run=dry_run,
+        **kwargs,
+    )
+
+
+def uninstall(home, *, dry_run=False, agentmaster_home=None):
+    return _claude_uninstall(
+        home,
+        agentmaster_home=agentmaster_home or (home.parent / 'agentmaster-home'),
+        dry_run=dry_run,
     )
 
 
@@ -290,3 +324,82 @@ def test_install_fails_closed_on_non_object_hooks(tmp_path, repo_root):
         install(repo_root, home, roles=_roles(), dry_run=False)
 
     assert not (home / 'skills').exists()
+
+
+def test_install_writes_agentmaster_config_and_owned_state(
+    tmp_path: Path, repo_root
+) -> None:
+    home = tmp_path / 'claude-home'
+    agentmaster_home = tmp_path / 'agentmaster-home'
+    roles = _roles(orchestrator='orch-model', orchestrator_effort=Effort.LOW)
+
+    install(
+        repo_root, home, roles=roles, dry_run=False, agentmaster_home=agentmaster_home
+    )
+
+    config_text = (agentmaster_home / 'config.toml').read_text(encoding='utf-8')
+    assert 'schema_version = 1' in config_text
+    assert 'delivery_mode = "local"' in config_text
+    assert 'model = "orch-model"' in config_text
+    assert 'effort = "low"' in config_text
+
+    owned_state = json.loads(
+        (agentmaster_home / 'owned-state.json').read_text(encoding='utf-8')
+    )
+    assert 'PreToolUse' in owned_state['targets']['claude']['hooks']
+
+
+def test_managed_files_participate_in_dry_run_reporting(
+    tmp_path: Path, repo_root, statuses
+) -> None:
+    home = tmp_path / 'claude-home'
+    agentmaster_home = tmp_path / 'agentmaster-home'
+
+    report = install(repo_root, home, dry_run=True, agentmaster_home=agentmaster_home)
+
+    destinations = {path.name for _, path in report.entries}
+    assert {'settings.json', 'config.toml', 'owned-state.json'} <= destinations
+    assert not agentmaster_home.exists()
+
+
+def test_uninstall_preserves_user_edited_hook_entry(tmp_path: Path, repo_root) -> None:
+    """The Task 6 fix: editing a managed hook entry protects it from uninstall."""
+    home = tmp_path / 'claude-home'
+    agentmaster_home = tmp_path / 'agentmaster-home'
+
+    install(repo_root, home, dry_run=False, agentmaster_home=agentmaster_home)
+    settings = _read_settings(home)
+    owned_entry = next(
+        entry
+        for entry in settings['hooks']['PreToolUse']
+        if 'dispatch_guard.py' in entry['hooks'][0]['command']
+    )
+    edited_entry = json.loads(json.dumps(owned_entry))
+    edited_entry['hooks'][0]['command'] += ' --user-added-flag'
+    settings['hooks']['PreToolUse'] = [
+        edited_entry if entry is owned_entry else entry
+        for entry in settings['hooks']['PreToolUse']
+    ]
+    (home / 'settings.json').write_text(json.dumps(settings, indent=2), encoding='utf-8')
+
+    uninstall(home, dry_run=False, agentmaster_home=agentmaster_home)
+
+    surviving = _read_settings(home)
+    assert edited_entry in surviving['hooks']['PreToolUse']
+
+
+def test_second_install_owned_state_stays_stable(tmp_path: Path, repo_root) -> None:
+    home = tmp_path / 'claude-home'
+    agentmaster_home = tmp_path / 'agentmaster-home'
+
+    install(repo_root, home, dry_run=False, agentmaster_home=agentmaster_home)
+    first = (agentmaster_home / 'owned-state.json').read_text(encoding='utf-8')
+
+    report = install(repo_root, home, dry_run=False, agentmaster_home=agentmaster_home)
+    second = (agentmaster_home / 'owned-state.json').read_text(encoding='utf-8')
+
+    assert first == second
+    owned_state_entries = [
+        status for status, path in report.entries if path.name == 'owned-state.json'
+    ]
+    assert owned_state_entries == ['skip']
