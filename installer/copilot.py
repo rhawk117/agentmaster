@@ -3,7 +3,7 @@
 Composes the transactional actions core, the manifest, and the worker
 renderer into a single `install`/`uninstall` pair for the Copilot user
 scope. Ported from the retired shell installer: 4 rendered
-workers plus 3 re-pinned coordinator files under `home/agents/`, the 3
+workers plus 4 re-pinned coordinator files under `home/agents/`, the 4
 router-skill trees under `home/skills/`, the 4 hook scripts under
 `home/agentmaster-hooks/`, and a `home/hooks/agentmaster.json` event
 config that participates in the same classify/backup/dry-run pass.

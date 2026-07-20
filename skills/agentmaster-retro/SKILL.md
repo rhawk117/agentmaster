@@ -149,7 +149,9 @@ matching the repository's convention.
 Once every dispatched fix is verified, dispatch a scout to write the retro of
 record to `.agentmaster/retro/<YYYY-MM-DD>-<slug>.md`: the corpus
 inventoried, the ranked ledger with fix status, the fix tasks and their
-verification outcomes, and anything deferred to Open Questions.
+verification outcomes, and anything deferred to Open Questions. Commit and
+push the dated retro document itself, matching the repository's convention —
+the loop is not closed until its own record is durable.
 
 Recursion: each subsequent pipeline run deposits new transcripts into
 `.transcripts/` and new root-level artifacts; re-running `/agentmaster-retro`

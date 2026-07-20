@@ -31,7 +31,12 @@ def test_fresh_install_creates_everything(tmp_path: Path, repo_root, statuses) -
     assert set(statuses(report.entries)) == {'create'}
     agents = sorted(p.name for p in (home / 'agents').glob('*.agent.md'))
     assert len(agents) == 8
-    for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
+    for skill in (
+        'agentmaster-plan',
+        'agentmaster-execute',
+        'agentmaster-review',
+        'agentmaster-retro',
+    ):
         assert (home / 'skills' / skill / 'SKILL.md').is_file()
     hooks = sorted(p.name for p in (home / 'agentmaster-hooks').iterdir())
     assert len(hooks) == 4
@@ -48,7 +53,12 @@ def test_coordinators_repinned_workers_keep_pins(tmp_path: Path, repo_root) -> N
 
     install(repo_root, home, model='opus-test', dry_run=False)
 
-    for coordinator in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
+    for coordinator in (
+        'agentmaster-plan',
+        'agentmaster-execute',
+        'agentmaster-review',
+        'agentmaster-retro',
+    ):
         text = (home / 'agents' / f'{coordinator}.agent.md').read_text(encoding='utf-8')
         assert 'model: opus-test\n' in text
     scout = (home / 'agents' / 'scout.agent.md').read_text(encoding='utf-8')
@@ -82,7 +92,12 @@ def test_uninstall_removes_ours_and_spares_others(tmp_path: Path, repo_root) -> 
     uninstall(home, dry_run=False)
 
     assert not (home / 'agents').exists() or not any((home / 'agents').iterdir())
-    for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
+    for skill in (
+        'agentmaster-plan',
+        'agentmaster-execute',
+        'agentmaster-review',
+        'agentmaster-retro',
+    ):
         assert not (home / 'skills' / skill).exists()
     assert not (home / 'agentmaster-hooks').exists()
     assert not (home / 'hooks' / 'agentmaster.json').exists()
