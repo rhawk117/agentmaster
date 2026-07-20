@@ -32,15 +32,20 @@ python install.py uninstall --target all   # clean removal, hook entries strippe
 ```
 
 Python 3.14+ is the only requirement. The installer is stdlib-only, so there
-are no dependencies to install. Explicit flags always win; when a flag is
-absent and the session is a TTY the installer prompts for the model
-choice, and a non-TTY session takes the defaults silently
-(`--model` overrides the model pin either way). Every file it would overwrite
-is copied first into a timestamped `agentmaster-backup-<timestamp>/` under the
-config home, and the five hook events it merges into `settings.json` are
-merged idempotently, never clobbering hooks you already have. The
-superpowers-plugin check prints the exact install commands when the plugin is
-missing.
+are no dependencies to install. Every role — coordinator, orchestrator,
+implementer, reviewer — resolves independently: `--claude-model` /
+`--copilot-model` sets the coordinator, and `--claude-orchestrator-model`,
+`--claude-implementer-model`, `--claude-review-model` (each with a matching
+`-effort low|medium|high|xhigh|max` flag), and `--copilot-implementer-model`
+target one role. Explicit flags always win; when a flag is absent and the
+session is a TTY the installer prompts per role, and a non-TTY session (or
+`--no-input`) takes the recommended default silently. Copilot has no
+orchestrator/reviewer roles and never gets an effort field. Every file it
+would overwrite is copied first into a timestamped
+`agentmaster-backup-<timestamp>/` under the config home, and the five hook
+events it merges into `settings.json` are merged idempotently, never
+clobbering hooks you already have. The superpowers-plugin check prints the
+exact install commands when the plugin is missing.
 
 After a Claude Code install, restart once if `~/.claude/skills/` or
 `~/.claude/agents/` were newly created. Keep `CLAUDE_CODE_SUBAGENT_MODEL`

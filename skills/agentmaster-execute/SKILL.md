@@ -4,6 +4,7 @@ description: Executes an approved agentmaster-plan plan and chains straight into
 argument-hint: "[plan path]"
 disable-model-invocation: true
 model: sonnet  # dispatch is mechanical bookkeeping — no frontier needed; agentmaster-review elevates itself when the chain reaches it
+effort: medium
 hooks:
   PreToolUse:
     - matcher: "Grep|Glob|Bash|WebFetch|WebSearch|Edit|Write|NotebookEdit"

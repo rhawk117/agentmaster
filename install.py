@@ -1,15 +1,25 @@
 """agentmaster installer CLI.
 
 Commands:
-    python install.py install   --target claude|copilot|all [--dry-run] [--model NAME]
-                                 [--config PATH] [--agentmaster-home PATH] [--no-input]
+    python install.py install   --target claude|copilot|all [--dry-run] [--no-input]
+                                 [--claude-model NAME] [--copilot-model NAME]
+                                 [--claude-orchestrator-model NAME]
+                                 [--claude-orchestrator-effort low|medium|high|xhigh|max]
+                                 [--claude-implementer-model NAME]
+                                 [--claude-implementer-effort low|medium|high|xhigh|max]
+                                 [--claude-review-model NAME]
+                                 [--claude-review-effort low|medium|high|xhigh|max]
+                                 [--copilot-implementer-model NAME]
+                                 [--config PATH] [--agentmaster-home PATH]
     python install.py uninstall --target claude|copilot|all [--dry-run]
     python install.py validate
     python install.py sync
 
-`--model` wins when given; when absent on an interactive terminal the
-installer asks, otherwise it uses the per-platform default silently.
-`--no-input` and a non-interactive stdin both suppress prompting.
+Each role (coordinator, orchestrator, implementer, reviewer) resolves
+independently: an explicit flag wins; when absent on an interactive terminal
+the installer prompts; otherwise it uses the recommended default silently.
+`--no-input` and a non-interactive stdin both suppress prompting. Copilot has
+no orchestrator/reviewer roles and never gets an effort field.
 Destinations honor `CLAUDE_CONFIG_DIR` / `COPILOT_CONFIG_DIR` and the
 `--claude-dir` / `--copilot-dir` overrides. `--config` loads a versioned
 TOML file (schema in SPEC.md §12); explicit CLI flags always win over it.
@@ -24,13 +34,19 @@ from typing import TYPE_CHECKING
 from installer import claude, copilot
 from installer.config import (
     MODEL_RE,
+    ClaudeRoleConfig,
     ConfigError,
+    CopilotRoleConfig,
+    Effort,
     ResolvedConfig,
+    Role,
+    RoleOverride,
     Target,
     UnresolvedConfig,
     load_config_document,
     resolve,
-    resolve_model,
+    resolve_role,
+    validate_role_flags,
 )
 from installer.parity import validate
 from installer.render import sync_workers
@@ -39,25 +55,20 @@ if TYPE_CHECKING:
     from installer.actions import InstallReport
 
 ROOT = Path(__file__).resolve().parent
-MODEL_MENU = {
-    'claude': (
-        'frontier model for the plan and review skills '
-        '(execute stays on sonnet by design):\n'
-        '  1) opus            (alias — resolves to Opus 4.8; default)\n'
-        '  2) claude-opus-4-8 (pinned full ID)\n'
-        '  3) fable           (if your org enables it)\n'
-        '  4) custom',
-        {'1': 'opus', '': 'opus', '2': 'claude-opus-4-8', '3': 'fable'},
-    ),
-    'copilot': (
-        'frontier reasoning model for the coordinators '
-        '(verify availability with /model after install):\n'
-        '  1) claude-opus-4.8   (default — frontier reasoning)\n'
-        '  2) claude-sonnet-4.6 (budget alternative)\n'
-        '  3) custom slug',
-        {'1': 'claude-opus-4.8', '': 'claude-opus-4.8', '2': 'claude-sonnet-4.6'},
-    ),
-}
+_MODEL_FIELDS = (
+    'claude_model',
+    'copilot_model',
+    'claude_orchestrator_model',
+    'claude_implementer_model',
+    'claude_review_model',
+    'copilot_implementer_model',
+)
+_REMOVED_MODEL_MESSAGE = (
+    '--model was removed; use --claude-model/--copilot-model for the coordinator, '
+    'or a role-specific flag: --claude-orchestrator-model/-effort, '
+    '--claude-implementer-model/-effort, --claude-review-model/-effort, '
+    '--copilot-implementer-model.'
+)
 
 
 def _home(target: Target, resolved: ResolvedConfig) -> Path:
@@ -67,19 +78,42 @@ def _home(target: Target, resolved: ResolvedConfig) -> Path:
     return claude.default_home() if target is Target.CLAUDE else copilot.default_home()
 
 
-def _prompt_model(target: Target) -> str:
-    menu, choices = MODEL_MENU[target]
-    print(menu)
-    choice = input('choice [1]: ').strip()
-    return choices.get(choice) or input('model: ').strip()
+def _prompt_role(
+    role: Role, target: Target, default_model: str, default_effort: Effort | None
+) -> tuple[str, Effort | None]:
+    print(f'{target}/{role}:')
+    model = input(f'  model [{default_model}]: ').strip() or default_model
+    if default_effort is None:
+        return model, None
+    choices = '/'.join(effort.value for effort in Effort)
+    raw_effort = input(f'  effort ({choices}) [{default_effort}]: ').strip()
+    return model, Effort(raw_effort) if raw_effort else default_effort
+
+
+def _reject_removed_model_flag(argv: list[str]) -> bool:
+    if any(arg == '--model' or arg.startswith('--model=') for arg in argv):
+        print(_REMOVED_MODEL_MESSAGE, file=sys.stderr)
+        return True
+    return False
+
+
+def _invalid_model(unresolved: UnresolvedConfig) -> str | None:
+    for name in _MODEL_FIELDS:
+        value = getattr(unresolved, name)
+        if value and not MODEL_RE.match(value):
+            return value
+    return None
 
 
 def _unresolved_config(args: argparse.Namespace) -> UnresolvedConfig:
+    def _effort(name: str) -> Effort | None:
+        value = getattr(args, name, None)
+        return Effort(value) if value else None
+
     return UnresolvedConfig(
         target=Target(args.target),
         dry_run=getattr(args, 'dry_run', False),
         no_input=getattr(args, 'no_input', False),
-        model=getattr(args, 'model', None),
         claude_dir=Path(args.claude_dir) if getattr(args, 'claude_dir', None) else None,
         copilot_dir=Path(args.copilot_dir)
         if getattr(args, 'copilot_dir', None)
@@ -88,6 +122,15 @@ def _unresolved_config(args: argparse.Namespace) -> UnresolvedConfig:
         agentmaster_home=Path(args.agentmaster_home)
         if getattr(args, 'agentmaster_home', None)
         else None,
+        claude_model=getattr(args, 'claude_model', None),
+        copilot_model=getattr(args, 'copilot_model', None),
+        claude_orchestrator_model=getattr(args, 'claude_orchestrator_model', None),
+        claude_orchestrator_effort=_effort('claude_orchestrator_effort'),
+        claude_implementer_model=getattr(args, 'claude_implementer_model', None),
+        claude_implementer_effort=_effort('claude_implementer_effort'),
+        claude_review_model=getattr(args, 'claude_review_model', None),
+        claude_review_effort=_effort('claude_review_effort'),
+        copilot_implementer_model=getattr(args, 'copilot_implementer_model', None),
     )
 
 
@@ -109,10 +152,67 @@ def _warn_superpowers(target: Target, home: Path) -> None:
     print(f'  {cli} plugin install superpowers@superpowers-marketplace')
 
 
+def _resolve_claude_roles(
+    unresolved: UnresolvedConfig, *, is_tty: bool
+) -> ClaudeRoleConfig:
+    def _role(
+        role: Role, model: str | None, effort: Effort | None = None
+    ) -> RoleOverride:
+        return resolve_role(
+            role,
+            Target.CLAUDE,
+            explicit_model=model,
+            explicit_effort=effort,
+            no_input=unresolved.no_input,
+            is_tty=is_tty,
+            prompt=_prompt_role,
+        )
+
+    return ClaudeRoleConfig(
+        coordinator_model=_role(Role.COORDINATOR, unresolved.claude_model).model,
+        orchestrator=_role(
+            Role.ORCHESTRATOR,
+            unresolved.claude_orchestrator_model,
+            unresolved.claude_orchestrator_effort,
+        ),
+        implementer=_role(
+            Role.IMPLEMENTER,
+            unresolved.claude_implementer_model,
+            unresolved.claude_implementer_effort,
+        ),
+        reviewer=_role(
+            Role.REVIEWER, unresolved.claude_review_model, unresolved.claude_review_effort
+        ),
+    )
+
+
+def _resolve_copilot_roles(
+    unresolved: UnresolvedConfig, *, is_tty: bool
+) -> CopilotRoleConfig:
+    def _role(role: Role, model: str | None) -> RoleOverride:
+        return resolve_role(
+            role,
+            Target.COPILOT,
+            explicit_model=model,
+            explicit_effort=None,
+            no_input=unresolved.no_input,
+            is_tty=is_tty,
+            prompt=_prompt_role,
+        )
+
+    return CopilotRoleConfig(
+        coordinator_model=_role(Role.COORDINATOR, unresolved.copilot_model).model,
+        implementer_model=_role(
+            Role.IMPLEMENTER, unresolved.copilot_implementer_model
+        ).model,
+    )
+
+
 def _cmd_install(args: argparse.Namespace) -> int:
     unresolved = _unresolved_config(args)
-    if unresolved.model and not MODEL_RE.match(unresolved.model):
-        print(f'invalid model: {unresolved.model!r}', file=sys.stderr)
+    bad_model = _invalid_model(unresolved)
+    if bad_model is not None:
+        print(f'invalid model: {bad_model!r}', file=sys.stderr)
         return 1
 
     document = None
@@ -124,6 +224,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
             return 1
 
     try:
+        validate_role_flags(unresolved)
         resolved = resolve(unresolved, document)
     except ConfigError as error:
         print(f'invalid config: {error}', file=sys.stderr)
@@ -135,16 +236,14 @@ def _cmd_install(args: argparse.Namespace) -> int:
     is_tty = sys.stdin.isatty()
     for target in resolved.targets:
         home = _home(target, resolved)
-        model = resolve_model(target, unresolved, is_tty=is_tty, prompt=_prompt_model)
-        if not MODEL_RE.match(model):
-            print(f'invalid model: {model!r}', file=sys.stderr)
-            return 1
         try:
             if target is Target.CLAUDE:
-                report = claude.install(ROOT, home, model=model, dry_run=resolved.dry_run)
+                roles = _resolve_claude_roles(unresolved, is_tty=is_tty)
+                report = claude.install(ROOT, home, roles=roles, dry_run=resolved.dry_run)
             else:
+                roles = _resolve_copilot_roles(unresolved, is_tty=is_tty)
                 report = copilot.install(
-                    ROOT, home, model=model, dry_run=resolved.dry_run
+                    ROOT, home, roles=roles, dry_run=resolved.dry_run
                 )
         except (OSError, ValueError) as error:
             print(f'{target}: install failed: {error}', file=sys.stderr)
@@ -185,6 +284,9 @@ def _cmd_sync(_args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else argv
+    if _reject_removed_model_flag(raw_argv):
+        return 1
     parser = argparse.ArgumentParser(prog='install.py', description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     commands = {
@@ -203,7 +305,22 @@ def main(argv: list[str] | None = None) -> int:
             cmd.add_argument('--claude-dir', default=None)
             cmd.add_argument('--copilot-dir', default=None)
         if name == 'install':
-            cmd.add_argument('--model', default=None)
+            effort_choices = [effort.value for effort in Effort]
+            cmd.add_argument('--claude-model', default=None)
+            cmd.add_argument('--copilot-model', default=None)
+            cmd.add_argument('--claude-orchestrator-model', default=None)
+            cmd.add_argument(
+                '--claude-orchestrator-effort', choices=effort_choices, default=None
+            )
+            cmd.add_argument('--claude-implementer-model', default=None)
+            cmd.add_argument(
+                '--claude-implementer-effort', choices=effort_choices, default=None
+            )
+            cmd.add_argument('--claude-review-model', default=None)
+            cmd.add_argument(
+                '--claude-review-effort', choices=effort_choices, default=None
+            )
+            cmd.add_argument('--copilot-implementer-model', default=None)
             cmd.add_argument('--config', default=None)
             cmd.add_argument('--agentmaster-home', default=None)
             cmd.add_argument('--no-input', action='store_true')

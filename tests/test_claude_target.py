@@ -7,7 +7,26 @@ from pathlib import Path
 import pytest
 
 from installer.claude import default_home, install, uninstall
+from installer.config import ClaudeRoleConfig, Effort, RoleOverride
 from installer.render import render_worker
+
+
+def _roles(
+    *,
+    coordinator: str = 'opus',
+    orchestrator: str = 'sonnet',
+    orchestrator_effort: Effort = Effort.MEDIUM,
+    implementer: str = 'sonnet',
+    implementer_effort: Effort = Effort.MEDIUM,
+    reviewer: str = 'opus',
+    reviewer_effort: Effort = Effort.HIGH,
+) -> ClaudeRoleConfig:
+    return ClaudeRoleConfig(
+        coordinator_model=coordinator,
+        orchestrator=RoleOverride(model=orchestrator, effort=orchestrator_effort),
+        implementer=RoleOverride(model=implementer, effort=implementer_effort),
+        reviewer=RoleOverride(model=reviewer, effort=reviewer_effort),
+    )
 
 
 def _agentmaster_entry_count(settings: dict) -> int:
@@ -36,7 +55,7 @@ def test_default_home_honors_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_fresh_install_writes_everything(tmp_path: Path, repo_root, statuses) -> None:
     home = tmp_path / 'claude-home'
 
-    report = install(repo_root, home, model='opus', dry_run=False)
+    report = install(repo_root, home, roles=_roles(), dry_run=False)
 
     assert set(statuses(report.entries)) == {'create'}
 
@@ -69,23 +88,44 @@ def test_fresh_install_writes_everything(tmp_path: Path, repo_root, statuses) ->
     }
 
 
-def test_model_pin_only_in_plan_and_review(tmp_path: Path, repo_root) -> None:
+def test_skill_roles_pin_independently(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
-    install(repo_root, home, model='opus', dry_run=False)
-
-    pin = 'model: opus  # set by install.py'
-    for skill in ('agentmaster-plan', 'agentmaster-review', 'agentmaster-retro'):
-        text = (home / 'skills' / skill / 'SKILL.md').read_text(encoding='utf-8')
-        assert pin in text
-    execute = (home / 'skills' / 'agentmaster-execute' / 'SKILL.md').read_text(
-        encoding='utf-8'
+    roles = _roles(
+        coordinator='coord-model',
+        orchestrator='orch-model',
+        orchestrator_effort=Effort.LOW,
+        reviewer='review-model',
+        reviewer_effort=Effort.XHIGH,
     )
-    assert pin not in execute
+
+    install(repo_root, home, roles=roles, dry_run=False)
+
+    def _read(skill: str) -> str:
+        return (home / 'skills' / skill / 'SKILL.md').read_text(encoding='utf-8')
+
+    def _frontmatter_block(text: str) -> list[str]:
+        lines = text.splitlines()
+        closing = next(i for i in range(1, len(lines)) if lines[i] == '---')
+        return lines[1:closing]
+
+    for skill in ('agentmaster-plan', 'agentmaster-retro'):
+        text = _read(skill)
+        assert 'model: coord-model\n' in text
+        block = _frontmatter_block(text)
+        assert not any(line.startswith('effort:') for line in block)
+
+    execute = _read('agentmaster-execute')
+    assert 'model: orch-model\n' in execute
+    assert 'effort: low\n' in execute
+
+    review = _read('agentmaster-review')
+    assert 'model: review-model\n' in review
+    assert 'effort: xhigh\n' in review
 
 
 def test_workers_installed_verbatim(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
-    install(repo_root, home, model='opus', dry_run=False)
+    install(repo_root, home, roles=_roles(), dry_run=False)
 
     for worker in ('scout', 'implementer'):
         text = (home / 'agents' / f'{worker}.md').read_text(encoding='utf-8')
@@ -94,7 +134,7 @@ def test_workers_installed_verbatim(tmp_path: Path, repo_root) -> None:
 
 def test_cost_boundary_rewritten_in_skills(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
-    install(repo_root, home, model='opus', dry_run=False)
+    install(repo_root, home, roles=_roles(), dry_run=False)
 
     interpreter = Path(sys.executable).as_posix()
     home_posix = home.resolve().as_posix()
@@ -123,11 +163,11 @@ def test_second_install_is_idempotent(tmp_path: Path, repo_root, statuses) -> No
         encoding='utf-8',
     )
 
-    install(repo_root, home, model='opus', dry_run=False)
+    install(repo_root, home, roles=_roles(), dry_run=False)
     first = _read_settings(home)
     first_count = _agentmaster_entry_count(first)
 
-    report = install(repo_root, home, model='opus', dry_run=False)
+    report = install(repo_root, home, roles=_roles(), dry_run=False)
 
     assert 'create' not in statuses(report.entries)
     second = _read_settings(home)
@@ -143,7 +183,7 @@ def test_second_install_is_idempotent(tmp_path: Path, repo_root, statuses) -> No
 def test_dry_run_writes_nothing(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'claude-home'
 
-    report = install(repo_root, home, model='opus', dry_run=True)
+    report = install(repo_root, home, roles=_roles(), dry_run=True)
 
     assert report.entries
     assert not home.exists()
@@ -166,7 +206,7 @@ def test_uninstall_removes_agentmaster_only(tmp_path: Path, repo_root) -> None:
         encoding='utf-8',
     )
 
-    install(repo_root, home, model='opus', dry_run=False)
+    install(repo_root, home, roles=_roles(), dry_run=False)
     uninstall(home, dry_run=False)
 
     for skill in ('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'):
@@ -202,7 +242,7 @@ def test_fake_manifest_installs_exactly_its_files(tmp_path: Path, make_manifest)
         claude_frontmatter={'scout': 'name: scout\nmodel: haiku\n'},
     )
 
-    install(root, home, model='opus', dry_run=False, manifest=manifest)
+    install(root, home, roles=_roles(), dry_run=False, manifest=manifest)
 
     assert (home / 'skills' / 'myskill' / 'SKILL.md').is_file()
     installed_scout = (home / 'agents' / 'scout.md').read_text(encoding='utf-8')
@@ -225,7 +265,7 @@ def test_preflight_missing_source_raises_and_writes_nothing(
     )
 
     with pytest.raises(FileNotFoundError):
-        install(root, home, model='opus', dry_run=False, manifest=manifest)
+        install(root, home, roles=_roles(), dry_run=False, manifest=manifest)
 
     assert not home.exists()
 
@@ -236,7 +276,7 @@ def test_install_fails_closed_on_malformed_settings(tmp_path, repo_root):
     (home / 'settings.json').write_text('[]\n')
 
     with pytest.raises(ValueError, match=r'settings\.json'):
-        install(repo_root, home, model='opus', dry_run=False)
+        install(repo_root, home, roles=_roles(), dry_run=False)
 
     assert not (home / 'skills').exists()
 
@@ -247,6 +287,6 @@ def test_install_fails_closed_on_non_object_hooks(tmp_path, repo_root):
     (home / 'settings.json').write_text('{"hooks": []}\n')
 
     with pytest.raises(ValueError, match='hooks'):
-        install(repo_root, home, model='opus', dry_run=False)
+        install(repo_root, home, roles=_roles(), dry_run=False)
 
     assert not (home / 'skills').exists()

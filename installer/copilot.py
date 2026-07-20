@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from installer.actions import InstallReport
+    from installer.config import CopilotRoleConfig
     from installer.manifest import Manifest
 
 
@@ -52,24 +53,33 @@ def _preflight(root: Path, manifest: Manifest) -> None:
         raise FileNotFoundError(msg)
 
 
-def _worker_plans(root: Path, home: Path, manifest: Manifest) -> list[FilePlan]:
-    return [
-        FilePlan(
-            content=render_worker(worker, 'copilot', manifest, root),
-            destination=home / 'agents' / f'{worker}.agent.md',
+def _worker_plans(
+    root: Path, home: Path, roles: CopilotRoleConfig, manifest: Manifest
+) -> list[FilePlan]:
+    plans = []
+    for worker in manifest.workers:
+        overrides = (
+            {'model': roles.implementer_model} if worker == 'implementer' else None
         )
-        for worker in manifest.workers
-    ]
+        plans.append(
+            FilePlan(
+                content=render_worker(
+                    worker, 'copilot', manifest, root, overrides=overrides
+                ),
+                destination=home / 'agents' / f'{worker}.agent.md',
+            )
+        )
+    return plans
 
 
 def _coordinator_plans(
-    root: Path, home: Path, model: str, manifest: Manifest
+    root: Path, home: Path, roles: CopilotRoleConfig, manifest: Manifest
 ) -> list[FilePlan]:
     plans: list[FilePlan] = []
     for coordinator in manifest.copilot_coordinators:
         source = root / 'copilot' / 'agents' / f'{coordinator}.agent.md'
         text = source.read_text(encoding='utf-8')
-        repinned = update_frontmatter(text, {'model': model})
+        repinned = update_frontmatter(text, {'model': roles.coordinator_model})
         plans.append(
             FilePlan(
                 content=repinned,
@@ -133,7 +143,7 @@ def install(
     root: Path,
     home: Path,
     *,
-    model: str,
+    roles: CopilotRoleConfig,
     dry_run: bool,
     manifest: Manifest = MANIFEST,
 ) -> InstallReport:
@@ -146,8 +156,8 @@ def install(
     home = home.resolve()
     _preflight(root, manifest)
     plans = [
-        *_worker_plans(root, home, manifest),
-        *_coordinator_plans(root, home, model, manifest),
+        *_worker_plans(root, home, roles, manifest),
+        *_coordinator_plans(root, home, roles, manifest),
         *_skill_plans(root, home, manifest),
         *_hook_plans(root, home, manifest),
         FilePlan(

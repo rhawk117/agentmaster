@@ -3,6 +3,7 @@ name: implementer
 description: Executes exactly one task group from an approved implementation plan — edits only the files the group owns, runs each task's verification, reports results. Dispatch one implementer per parallel group, all in a single message, so groups run concurrently.
 tools: Read, Edit, Write, Grep, Glob, Bash, Skill
 model: sonnet
+effort: medium
 maxTurns: 50
 color: green
 # isolation: worktree  # uncomment to give each implementer an isolated git worktree instead of relying on disjoint file ownership
