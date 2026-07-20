@@ -14,6 +14,7 @@ def _plan(**overrides) -> AgentmasterConfigPlan:
     fields = {
         'ledger_path': '/home/user/.agentmaster/ledger.sqlite3',
         'artifact_path': '/home/user/.agentmaster/artifacts',
+        'ledger_enabled': True,
         'delivery_mode': 'local',
         'orchestrator_model': 'sonnet',
         'orchestrator_effort': 'medium',
@@ -59,6 +60,12 @@ def test_render_config_preserves_unmanaged_table_verbatim():
     assert '[memory]' in text
     assert 'default_visibility = "project"' in text
     assert 'minimum_promotion_evidence = 2' in text
+
+
+def test_render_config_renders_ledger_enabled_flag():
+    text = render_config(_plan(ledger_enabled=False), existing_text=None)
+
+    assert 'enabled = false' in text
 
 
 def test_render_config_drops_managed_table_stale_values():

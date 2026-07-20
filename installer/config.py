@@ -151,6 +151,10 @@ class UnresolvedConfig:
     claude_review_model: str | None = None
     claude_review_effort: Effort | None = None
     copilot_implementer_model: str | None = None
+    ledger_path: Path | None = None
+    no_ledger: bool = False
+    artifact_dir: Path | None = None
+    delivery_mode: DeliveryMode | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,14 +185,21 @@ class ResolvedConfig:
     claude_dir: Path | None
     copilot_dir: Path | None
     agentmaster_home: Path
+    ledger_path: Path
+    artifact_path: Path
+    ledger_enabled: bool
     delivery_mode: DeliveryMode
     raw_capture: RawCapture
     redaction: RedactionMode
 
     def summary_lines(self) -> list[str]:
         """Render the resolved plan for display before any write happens."""
+        ledger_display = str(self.ledger_path) if self.ledger_enabled else 'disabled'
+        artifacts_display = str(self.artifact_path) if self.ledger_enabled else 'disabled'
         return [
             f'agentmaster home        {self.agentmaster_home}',
+            f'ledger                  {ledger_display}',
+            f'artifacts               {artifacts_display}',
             f'delivery mode           {self.delivery_mode}',
             f'raw capture             {self.raw_capture}',
             f'redaction               {self.redaction}',
@@ -263,7 +274,11 @@ def resolve(
     """
     document = document or {}
     agentmaster_home = unresolved.agentmaster_home or DEFAULT_AGENTMASTER_HOME
-    delivery_mode = _document_delivery_mode(document) or DeliveryMode.LOCAL
+    delivery_mode = (
+        unresolved.delivery_mode
+        or _document_delivery_mode(document)
+        or DeliveryMode.LOCAL
+    )
     raw_capture = (
         _document_ledger_field(document, 'raw_output', RawCapture) or RawCapture.FAILURES
     )
@@ -278,10 +293,26 @@ def resolve(
         claude_dir=unresolved.claude_dir,
         copilot_dir=unresolved.copilot_dir,
         agentmaster_home=agentmaster_home,
+        ledger_path=unresolved.ledger_path or (agentmaster_home / 'ledger.sqlite3'),
+        artifact_path=unresolved.artifact_dir or (agentmaster_home / 'artifacts'),
+        ledger_enabled=not unresolved.no_ledger,
         delivery_mode=delivery_mode,
         raw_capture=raw_capture,
         redaction=redaction,
     )
+
+
+def validate_ledger_flags(unresolved: UnresolvedConfig) -> None:
+    """Reject `--no-ledger` combined with `--ledger-path` (SPEC.md §11).
+
+    Raises
+    ------
+    ConfigError
+        Both flags were given; disabling the ledger and pointing it
+        somewhere are mutually exclusive.
+    """
+    if unresolved.no_ledger and unresolved.ledger_path is not None:
+        raise ConfigError('--no-ledger', 'cannot be combined with --ledger-path')
 
 
 _CLAUDE_TARGET_FIELDS = (

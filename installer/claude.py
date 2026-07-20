@@ -168,6 +168,10 @@ def _managed_plans(
     home: Path,
     agentmaster_home: Path,
     roles: ClaudeRoleConfig,
+    *,
+    ledger_path: Path,
+    artifact_path: Path,
+    ledger_enabled: bool,
     delivery_mode: DeliveryMode,
     raw_capture: RawCapture,
     redaction: RedactionMode,
@@ -200,8 +204,9 @@ def _managed_plans(
 
     config_path = agentmaster_home / 'config.toml'
     config_plan = agentmaster_config.AgentmasterConfigPlan(
-        ledger_path=str(agentmaster_home / 'ledger.sqlite3'),
-        artifact_path=str(agentmaster_home / 'artifacts'),
+        ledger_path=str(ledger_path),
+        artifact_path=str(artifact_path),
+        ledger_enabled=ledger_enabled,
         delivery_mode=delivery_mode.value,
         orchestrator_model=roles.orchestrator.model,
         orchestrator_effort=_effort_value(roles.orchestrator, Role.ORCHESTRATOR),
@@ -248,6 +253,9 @@ def install(
     *,
     roles: ClaudeRoleConfig,
     agentmaster_home: Path,
+    ledger_path: Path,
+    artifact_path: Path,
+    ledger_enabled: bool,
     delivery_mode: DeliveryMode,
     raw_capture: RawCapture,
     redaction: RedactionMode,
@@ -269,7 +277,15 @@ def install(
         *_agent_plans(root, home, roles, manifest),
         *_hook_plans(root, home, manifest),
         *_managed_plans(
-            home, agentmaster_home, roles, delivery_mode, raw_capture, redaction
+            home,
+            agentmaster_home,
+            roles,
+            ledger_path=ledger_path,
+            artifact_path=artifact_path,
+            ledger_enabled=ledger_enabled,
+            delivery_mode=delivery_mode,
+            raw_capture=raw_capture,
+            redaction=redaction,
         ),
     ]
     return apply_plans(plans, backup_root=home, dry_run=dry_run)

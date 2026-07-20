@@ -48,6 +48,7 @@ class AgentmasterConfigPlan:
 
     ledger_path: str
     artifact_path: str
+    ledger_enabled: bool
     delivery_mode: str
     orchestrator_model: str
     orchestrator_effort: str
@@ -118,6 +119,7 @@ def render_managed_block(plan: AgentmasterConfigPlan) -> str:
         f'model = "{plan.reviewer_model}"\n'
         f'effort = "{plan.reviewer_effort}"\n\n'
         '[ledger]\n'
+        f'enabled = {"true" if plan.ledger_enabled else "false"}\n'
         f'raw_output = "{plan.raw_capture}"\n'
         f'redaction = "{plan.redaction}"\n'
     )
