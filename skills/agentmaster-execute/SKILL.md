@@ -25,7 +25,8 @@ agentmaster-plan in this project)
 
 ## Phase 1 — Load and gate
 
-First write the single word `execute` to `.agentmaster/.phase` — the one
+First write the single word `execute` to the session's `.phase` file at the
+path SessionStart announced (fallback: `.agentmaster/.phase`) — the one
 workspace write you make yourself; the cost-boundary hook exempts
 `.agentmaster/`. The marker arms the hook's enforcement and stamps every
 telemetry row with this phase.
@@ -93,6 +94,7 @@ without the review — implementation is not done until its verdict is in.
 Close with the cost appendix: every dispatch, its agent and model, tokens
 and duration where reported. Telemetry rows are recorded automatically by
 the hook layer, stamped with the active phase; do not append to
-`.agentmaster/telemetry.md`. Before returning, clear `.agentmaster/.phase`
-by overwriting it with empty content, retiring the cost boundary for this
-phase.
+`.agentmaster/telemetry.md`. Before returning, clear that same `.phase`
+marker (session path from SessionStart, or `.agentmaster/.phase` as
+fallback) by overwriting it with empty content, retiring the cost boundary
+for this phase.

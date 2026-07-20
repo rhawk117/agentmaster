@@ -38,14 +38,18 @@ def test_read_payload_valid(monkeypatch):
 def test_append_telemetry_format(tmp_path):
     payload = {'cwd': str(tmp_path)}
     hooklib.append_telemetry(payload, 'scout', 123, 456)
-    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    line = (
+        tmp_path / '.agentmaster' / 'sessions' / 'default' / 'telemetry.md'
+    ).read_text()
     assert line == 'hook,scout,,123,456\n'
 
 
 def test_append_telemetry_blank_defaults(tmp_path):
     payload = {'cwd': str(tmp_path)}
     hooklib.append_telemetry(payload, 'precompact')
-    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    line = (
+        tmp_path / '.agentmaster' / 'sessions' / 'default' / 'telemetry.md'
+    ).read_text()
     assert line == 'hook,precompact,,,\n'
 
 
@@ -55,18 +59,41 @@ def test_append_telemetry_stamps_active_phase(tmp_path):
     am.mkdir()
     (am / '.phase').write_text('review\n')
     hooklib.append_telemetry(payload, 'scout', 1, 2, 'sonnet')
-    line = (am / 'telemetry.md').read_text()
+    line = (am / 'sessions' / 'default' / 'telemetry.md').read_text()
     assert line == 'review,scout,sonnet,1,2\n'
 
 
 def test_current_phase_reads_strips_and_degrades(tmp_path):
-    am = tmp_path / '.agentmaster'
-    am.mkdir()
-    (am / '.phase').write_text('plan\n')
-    assert hooklib.current_phase(am) == 'plan'
-    (am / '.phase').write_text('')
-    assert hooklib.current_phase(am) == ''
-    assert hooklib.current_phase(tmp_path / 'missing') == ''
+    payload = {'cwd': str(tmp_path)}
+    sdir = hooklib.session_dir(payload)
+    (sdir / '.phase').write_text('plan\n')
+    assert hooklib.current_phase(payload) == 'plan'
+    (sdir / '.phase').write_text('')
+    assert hooklib.current_phase(payload) == ''
+
+
+def test_current_phase_falls_back_to_legacy_root(tmp_path):
+    payload = {'cwd': str(tmp_path)}
+    am = hooklib.agentmaster_dir(payload)
+    (am / '.phase').write_text('review\n')
+    assert hooklib.current_phase(payload) == 'review'
+
+
+def test_session_id_sanitizes_separators_and_dots_only():
+    assert hooklib.session_id({'session_id': 'abc/def'}) == 'abc_def'
+    assert hooklib.session_id({'session_id': 'abc\\def'}) == 'abc_def'
+    assert hooklib.session_id({'session_id': '.'}) == 'default'
+    assert hooklib.session_id({'session_id': '..'}) == 'default'
+    assert hooklib.session_id({'session_id': ''}) == 'default'
+    assert hooklib.session_id({}) == 'default'
+    assert hooklib.session_id({'session_id': 'sess-1'}) == 'sess-1'
+
+
+def test_session_dir_is_scoped_and_created(tmp_path):
+    payload = {'cwd': str(tmp_path), 'session_id': 'abc'}
+    sdir = hooklib.session_dir(payload)
+    assert sdir == tmp_path / '.agentmaster' / 'sessions' / 'abc'
+    assert sdir.is_dir()
 
 
 def test_tool_name_camel_and_snake():

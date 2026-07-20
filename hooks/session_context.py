@@ -1,11 +1,18 @@
-"""SessionStart -> inject a re-hydration pointer when agentmaster artifacts exist."""
+"""SessionStart -> announce the session workspace and re-hydration pointer."""
 
 import hooklib
 
 
 def main() -> int:
     payload = hooklib.read_payload()
-    am = hooklib.workspace(payload) / '.agentmaster'
+    root = hooklib.workspace(payload)
+    sdir = hooklib.session_dir(payload)
+    print(
+        f'agentmaster session workspace: {sdir.relative_to(root)}/ - write '
+        '.phase, .starts/, and telemetry.md here this session; '
+        '.agentmaster/.phase is read as a legacy fallback.'
+    )
+    am = root / '.agentmaster'
     if am.is_dir():
         files = sorted(p.name for p in am.iterdir() if p.is_file())
         if files:

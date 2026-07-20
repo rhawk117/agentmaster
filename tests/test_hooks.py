@@ -9,6 +9,7 @@ pytestmark = pytest.mark.subprocess
 
 
 def test_telemetry_writes_line_and_consumes_start(tmp_path, run_hook):
+    # Legacy .starts location predates session scoping; consume falls back to it.
     starts = tmp_path / '.agentmaster' / '.starts'
     starts.mkdir(parents=True)
     (starts / 'abc').write_text(str(time.time() - 1))
@@ -20,7 +21,9 @@ def test_telemetry_writes_line_and_consumes_start(tmp_path, run_hook):
     }
     result = run_hook('telemetry', payload)
     assert result.returncode == 0
-    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    line = (
+        tmp_path / '.agentmaster' / 'sessions' / 'default' / 'telemetry.md'
+    ).read_text()
     assert line.startswith('hook,scout,,42,')
     assert line.endswith('\n')
     assert not (starts / 'abc').exists()
@@ -48,7 +51,7 @@ def test_telemetry_row_carries_phase_and_model(tmp_path, run_hook):
     }
     result = run_hook('telemetry', payload)
     assert result.returncode == 0
-    line = (am / 'telemetry.md').read_text()
+    line = (am / 'sessions' / 'default' / 'telemetry.md').read_text()
     assert line.startswith('execute,scout,claude-haiku-4-5,15,')
 
 
@@ -74,7 +77,7 @@ def test_telemetry_finds_transcript_in_session_dir(tmp_path, run_hook):
     }
     result = run_hook('telemetry', payload)
     assert result.returncode == 0
-    line = (am / 'telemetry.md').read_text()
+    line = (am / 'sessions' / 'default' / 'telemetry.md').read_text()
     assert line.startswith('hook,scout,claude-haiku-4-5,10,')
 
 
@@ -82,7 +85,7 @@ def test_subagent_start_records_timestamp(tmp_path, run_hook):
     payload = {'cwd': str(tmp_path), 'agent_id': 'xyz'}
     result = run_hook('subagent_start', payload)
     assert result.returncode == 0
-    started = tmp_path / '.agentmaster' / '.starts' / 'xyz'
+    started = tmp_path / '.agentmaster' / 'sessions' / 'default' / '.starts' / 'xyz'
     assert started.is_file()
     assert float(started.read_text()) > 0
 
@@ -97,7 +100,8 @@ def test_precompact_snapshot_copies_and_logs(tmp_path, run_hook):
     snapshots = list((am / 'compaction-snapshots').iterdir())
     assert len(snapshots) == 1
     assert (snapshots[0] / 'ledger.md').read_text() == 'evidence'
-    assert 'hook,precompact:main,,,\n' in (am / 'telemetry.md').read_text()
+    telemetry = (am / 'sessions' / 'default' / 'telemetry.md').read_text()
+    assert 'hook,precompact:main,,,\n' in telemetry
 
 
 def test_precompact_snapshot_labels_agent_type_and_tokens(tmp_path, run_hook):
@@ -107,7 +111,8 @@ def test_precompact_snapshot_labels_agent_type_and_tokens(tmp_path, run_hook):
     payload = {'cwd': str(tmp_path), 'agent_type': 'implementer', 'token_count': 12345}
     result = run_hook('precompact_snapshot', payload)
     assert result.returncode == 0
-    assert (am / 'telemetry.md').read_text() == 'hook,precompact:implementer,,12345,\n'
+    telemetry = (am / 'sessions' / 'default' / 'telemetry.md').read_text()
+    assert telemetry == 'hook,precompact:implementer,,12345,\n'
 
 
 def test_precompact_snapshot_two_calls_never_collide(tmp_path, run_hook):
@@ -125,7 +130,8 @@ def test_precompact_snapshot_two_calls_never_collide(tmp_path, run_hook):
     for name in snapshots:
         snap = am / 'compaction-snapshots' / name
         assert (snap / 'ledger.md').read_text() == 'evidence'
-    assert len((am / 'telemetry.md').read_text().splitlines()) == 2
+    telemetry = (am / 'sessions' / 'default' / 'telemetry.md').read_text()
+    assert len(telemetry.splitlines()) == 2
 
 
 def test_precompact_snapshot_writes_debug_dump_when_enabled(tmp_path, run_hook):
@@ -150,10 +156,17 @@ def test_session_context_emits_pointer(tmp_path, run_hook):
     assert '.agentmaster/' in result.stdout
 
 
-def test_session_context_silent_without_artifacts(tmp_path, run_hook):
+def test_session_context_announces_session_dir_without_artifacts(tmp_path, run_hook):
     result = run_hook('session_context', {'cwd': str(tmp_path)})
     assert result.returncode == 0
-    assert result.stdout.strip() == ''
+    assert '.agentmaster/sessions/default' in result.stdout
+    assert 'ledger.md' not in result.stdout
+
+
+def test_session_context_announces_sanitized_session_path(tmp_path, run_hook):
+    result = run_hook('session_context', {'cwd': str(tmp_path), 'session_id': 'abc123'})
+    assert result.returncode == 0
+    assert '.agentmaster/sessions/abc123' in result.stdout
 
 
 def _arm_phase(tmp_path, phase='plan'):
@@ -274,7 +287,9 @@ def test_copilot_post_pops_fifo(tmp_path, run_hook):
     payload = {'cwd': str(tmp_path), 'toolName': 'agent', 'toolArgs': {}}
     result = run_hook('copilot_telemetry_post', payload)
     assert result.returncode == 0
-    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    line = (
+        tmp_path / '.agentmaster' / 'sessions' / 'default' / 'telemetry.md'
+    ).read_text()
     assert line.startswith('hook,scout,,,')
     assert line.endswith('\n')
     remaining = (starts / 'copilot-queue').read_text()
@@ -286,5 +301,33 @@ def test_copilot_post_empty_queue(tmp_path, run_hook):
     payload = {'cwd': str(tmp_path), 'toolName': 'agent', 'toolArgs': {}}
     result = run_hook('copilot_telemetry_post', payload)
     assert result.returncode == 0
-    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    line = (
+        tmp_path / '.agentmaster' / 'sessions' / 'default' / 'telemetry.md'
+    ).read_text()
     assert line == 'hook,agent,,,\n'
+
+
+def test_two_sessions_do_not_clobber_phase_or_telemetry(tmp_path, run_hook):
+    """Two sessions in one checkout must not share .phase or telemetry.md."""
+    am = tmp_path / '.agentmaster'
+    for session, phase in (('session-a', 'plan'), ('session-b', 'execute')):
+        sdir = am / 'sessions' / session
+        sdir.mkdir(parents=True)
+        (sdir / '.phase').write_text(f'{phase}\n')
+
+    for session in ('session-a', 'session-b'):
+        payload = {
+            'cwd': str(tmp_path),
+            'session_id': session,
+            'agent_type': 'scout',
+            'total_tokens': 1,
+        }
+        result = run_hook('telemetry', payload)
+        assert result.returncode == 0
+
+    line_a = (am / 'sessions' / 'session-a' / 'telemetry.md').read_text()
+    line_b = (am / 'sessions' / 'session-b' / 'telemetry.md').read_text()
+    assert line_a.startswith('plan,scout,')
+    assert line_b.startswith('execute,scout,')
+    assert line_a != line_b
+    assert not (am / 'telemetry.md').exists()

@@ -29,6 +29,39 @@ def agentmaster_dir(payload: dict[str, Any]) -> Path:
     return am
 
 
+def _sanitize_session_id(raw: str) -> str:
+    """Make a harness session id safe as a single path segment.
+
+    Path separators are replaced so the id can't escape the sessions/
+    directory; ids that are empty or made only of dots (which could
+    otherwise resolve to the current or a parent directory) fall back
+    to 'default'.
+    """
+    sid = raw.strip().replace('/', '_').replace('\\', '_')
+    if not sid or set(sid) == {'.'}:
+        return 'default'
+    return sid
+
+
+def session_id(payload: dict[str, Any]) -> str:
+    """Return the sanitized harness session id, or 'default' when absent."""
+    return _sanitize_session_id(str(payload.get('session_id') or ''))
+
+
+def session_dir(payload: dict[str, Any]) -> Path:
+    """Return this session's workspace dir, creating it if needed.
+
+    Layout: .agentmaster/sessions/<harness-session-id>/ holds the
+    per-session .phase marker, .starts/ start timestamps, and
+    telemetry.md rows, so two sessions in one checkout never clobber
+    each other. Reads of .phase and .starts/ fall back to the legacy
+    .agentmaster/ root for markers written before this layout existed.
+    """
+    sdir = agentmaster_dir(payload) / 'sessions' / session_id(payload)
+    sdir.mkdir(parents=True, exist_ok=True)
+    return sdir
+
+
 def debug_dump(payload: dict[str, Any]) -> None:
     """Append the raw payload to hook-debug.jsonl when debugging is enabled."""
     if os.environ.get('AGENTMASTER_HOOK_DEBUG'):
@@ -37,12 +70,23 @@ def debug_dump(payload: dict[str, Any]) -> None:
             f.write(json.dumps(payload) + '\n')
 
 
-def current_phase(am: Path) -> str:
-    """Return the active phase named in .phase, or '' when absent/unreadable."""
-    try:
-        return (am / '.phase').read_text().strip().split()[0]
-    except OSError, IndexError, ValueError:
-        return ''
+def current_phase(payload: dict[str, Any]) -> str:
+    """Return the active phase named in .phase, or '' when absent/unreadable.
+
+    Reads the session-scoped marker first, falling back to the legacy
+    .agentmaster/.phase for markers written before session scoping.
+    """
+    for phase_file in (
+        session_dir(payload) / '.phase',
+        agentmaster_dir(payload) / '.phase',
+    ):
+        try:
+            text = phase_file.read_text().strip()
+        except OSError:
+            continue
+        if text:
+            return text.split()[0]
+    return ''
 
 
 def append_telemetry(
@@ -52,10 +96,10 @@ def append_telemetry(
     duration_ms: str | int = '',
     model: str = '',
 ) -> None:
-    """Append a telemetry row for the given agent to telemetry.md."""
-    am = agentmaster_dir(payload)
-    phase = current_phase(am) or 'hook'
-    with (am / 'telemetry.md').open('a') as f:
+    """Append a telemetry row for the given agent to the session's telemetry.md."""
+    sdir = session_dir(payload)
+    phase = current_phase(payload) or 'hook'
+    with (sdir / 'telemetry.md').open('a') as f:
         f.write(f'{phase},{agent},{model},{tokens},{duration_ms}\n')
 
 
