@@ -2,24 +2,36 @@
 
 Commands:
     python install.py install   --target claude|copilot|all [--dry-run] [--model NAME]
+                                 [--config PATH] [--agentmaster-home PATH] [--no-input]
     python install.py uninstall --target claude|copilot|all [--dry-run]
-    python install.py validate  --target all
+    python install.py validate
     python install.py sync
 
 `--model` wins when given; when absent on an interactive terminal the
 installer asks, otherwise it uses the per-platform default silently.
+`--no-input` and a non-interactive stdin both suppress prompting.
 Destinations honor `CLAUDE_CONFIG_DIR` / `COPILOT_CONFIG_DIR` and the
-`--claude-dir` / `--copilot-dir` overrides.
+`--claude-dir` / `--copilot-dir` overrides. `--config` loads a versioned
+TOML file (schema in SPEC.md §12); explicit CLI flags always win over it.
 Exit code is 0 on success, 1 on any failure or validation finding.
 """
 
 import argparse
-import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from installer import claude, copilot
+from installer.config import (
+    MODEL_RE,
+    ConfigError,
+    ResolvedConfig,
+    Target,
+    UnresolvedConfig,
+    load_config_document,
+    resolve,
+    resolve_model,
+)
 from installer.parity import validate
 from installer.render import sync_workers
 
@@ -27,8 +39,6 @@ if TYPE_CHECKING:
     from installer.actions import InstallReport
 
 ROOT = Path(__file__).resolve().parent
-MODEL_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
-DEFAULT_MODEL = {'claude': 'opus', 'copilot': 'claude-opus-4.8'}
 MODEL_MENU = {
     'claude': (
         'frontier model for the plan and review skills '
@@ -50,33 +60,38 @@ MODEL_MENU = {
 }
 
 
-def _targets(value: str) -> tuple[str, ...]:
-    return ('claude', 'copilot') if value == 'all' else (value,)
-
-
-def _home(target: str, args: argparse.Namespace) -> Path:
-    override = args.claude_dir if target == 'claude' else args.copilot_dir
+def _home(target: Target, resolved: ResolvedConfig) -> Path:
+    override = resolved.claude_dir if target is Target.CLAUDE else resolved.copilot_dir
     if override:
-        return Path(override)
-    return claude.default_home() if target == 'claude' else copilot.default_home()
+        return override
+    return claude.default_home() if target is Target.CLAUDE else copilot.default_home()
 
 
-def _prompt_model(target: str) -> str:
+def _prompt_model(target: Target) -> str:
     menu, choices = MODEL_MENU[target]
     print(menu)
     choice = input('choice [1]: ').strip()
     return choices.get(choice) or input('model: ').strip()
 
 
-def _resolve_model(target: str, args: argparse.Namespace) -> str:
-    if args.model:
-        return args.model
-    if sys.stdin.isatty():
-        return _prompt_model(target)
-    return DEFAULT_MODEL[target]
+def _unresolved_config(args: argparse.Namespace) -> UnresolvedConfig:
+    return UnresolvedConfig(
+        target=Target(args.target),
+        dry_run=getattr(args, 'dry_run', False),
+        no_input=getattr(args, 'no_input', False),
+        model=getattr(args, 'model', None),
+        claude_dir=Path(args.claude_dir) if getattr(args, 'claude_dir', None) else None,
+        copilot_dir=Path(args.copilot_dir)
+        if getattr(args, 'copilot_dir', None)
+        else None,
+        config_path=Path(args.config) if getattr(args, 'config', None) else None,
+        agentmaster_home=Path(args.agentmaster_home)
+        if getattr(args, 'agentmaster_home', None)
+        else None,
+    )
 
 
-def _print_report(target: str, report: InstallReport) -> None:
+def _print_report(target: Target, report: InstallReport) -> None:
     for status, path in report.entries:
         print(f'  {status:>6}  {path}')
     if report.backup_dir is not None:
@@ -84,31 +99,53 @@ def _print_report(target: str, report: InstallReport) -> None:
     print(f'{target}: {report.summary()}')
 
 
-def _warn_superpowers(target: str, home: Path) -> None:
-    plugin_dir = 'plugins' if target == 'claude' else 'installed-plugins'
+def _warn_superpowers(target: Target, home: Path) -> None:
+    plugin_dir = 'plugins' if target is Target.CLAUDE else 'installed-plugins'
     if any((home / plugin_dir).glob('*superpowers*')):
         return
-    cli = target if target == 'copilot' else 'claude'
+    cli = 'copilot' if target is Target.COPILOT else 'claude'
     print(f'note: superpowers plugin not detected for {target} — install with:')
     print(f'  {cli} plugin marketplace add obra/superpowers-marketplace')
     print(f'  {cli} plugin install superpowers@superpowers-marketplace')
 
 
 def _cmd_install(args: argparse.Namespace) -> int:
-    if args.model and not MODEL_RE.match(args.model):
-        print(f'invalid model: {args.model!r}', file=sys.stderr)
+    unresolved = _unresolved_config(args)
+    if unresolved.model and not MODEL_RE.match(unresolved.model):
+        print(f'invalid model: {unresolved.model!r}', file=sys.stderr)
         return 1
-    for target in _targets(args.target):
-        home = _home(target, args)
-        model = _resolve_model(target, args)
+
+    document = None
+    if unresolved.config_path is not None:
+        try:
+            document = load_config_document(unresolved.config_path)
+        except ConfigError as error:
+            print(f'invalid config: {error}', file=sys.stderr)
+            return 1
+
+    try:
+        resolved = resolve(unresolved, document)
+    except ConfigError as error:
+        print(f'invalid config: {error}', file=sys.stderr)
+        return 1
+
+    for line in resolved.summary_lines():
+        print(f'  {line}')
+
+    is_tty = sys.stdin.isatty()
+    for target in resolved.targets:
+        home = _home(target, resolved)
+        model = resolve_model(target, unresolved, is_tty=is_tty, prompt=_prompt_model)
         if not MODEL_RE.match(model):
             print(f'invalid model: {model!r}', file=sys.stderr)
             return 1
         try:
-            if target == 'claude':
-                report = claude.install(ROOT, home, model=model, dry_run=args.dry_run)
+            if target is Target.CLAUDE:
+                report = claude.install(ROOT, home, model=model, dry_run=resolved.dry_run)
             else:
-                report = copilot.install(ROOT, home, model=model, dry_run=args.dry_run)
+                report = copilot.install(
+                    ROOT, home, model=model, dry_run=resolved.dry_run
+                )
         except (OSError, ValueError) as error:
             print(f'{target}: install failed: {error}', file=sys.stderr)
             return 1
@@ -118,10 +155,11 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
 
 def _cmd_uninstall(args: argparse.Namespace) -> int:
-    for target in _targets(args.target):
-        module = claude if target == 'claude' else copilot
+    resolved = resolve(_unresolved_config(args))
+    for target in resolved.targets:
+        module = claude if target is Target.CLAUDE else copilot
         try:
-            report = module.uninstall(_home(target, args), dry_run=args.dry_run)
+            report = module.uninstall(_home(target, resolved), dry_run=resolved.dry_run)
         except OSError as error:
             print(f'{target}: uninstall failed: {error}', file=sys.stderr)
             return 1
@@ -157,16 +195,18 @@ def main(argv: list[str] | None = None) -> int:
     }
     for name in commands:
         cmd = sub.add_parser(name)
-        if name != 'sync':
+        if name in ('install', 'uninstall'):
             cmd.add_argument(
                 '--target', choices=('claude', 'copilot', 'all'), default='all'
             )
-        if name in ('install', 'uninstall'):
             cmd.add_argument('--dry-run', action='store_true')
             cmd.add_argument('--claude-dir', default=None)
             cmd.add_argument('--copilot-dir', default=None)
         if name == 'install':
             cmd.add_argument('--model', default=None)
+            cmd.add_argument('--config', default=None)
+            cmd.add_argument('--agentmaster-home', default=None)
+            cmd.add_argument('--no-input', action='store_true')
     args = parser.parse_args(argv)
     return commands[args.command](args)
 

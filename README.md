@@ -319,7 +319,7 @@ gap parallel mode leaves; a proportionality gate (and `--lite`) keeps the
 recommending no pipeline at all for trivial changes; serialized
 verifications batch into one dispatch; telemetry follows a fixed
 `phase,agent,model,tokens,duration_ms` schema summarized by
-`scripts/telemetry_report.py`; and `python install.py validate --target all`
+`scripts/telemetry_report.py`; and `python install.py validate`
 fails CI on criteria or generated-file drift.
 
 ### Further reading

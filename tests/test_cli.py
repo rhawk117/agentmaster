@@ -1,0 +1,93 @@
+"""CLI subprocess coverage for install.py.
+
+Exercises the installer through a real subprocess so exit codes, argparse
+error messages, and stdout/stderr formatting are covered end to end. Parity
+tests (generated-file/source equivalence) live in tests/test_parity.py.
+"""
+
+import pytest
+
+from installer.parity import validate
+
+
+@pytest.mark.subprocess
+def test_cli_install_dry_run_writes_nothing(tmp_path, run_cli, repo_root):
+    claude_home = tmp_path / 'claude-home'
+    copilot_home = tmp_path / 'copilot-home'
+
+    result = run_cli(
+        ['install', '--target', 'all', '--dry-run', '--no-input'],
+        cwd=repo_root,
+        env_extra={
+            'CLAUDE_CONFIG_DIR': str(claude_home),
+            'COPILOT_CONFIG_DIR': str(copilot_home),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert 'create' in result.stdout
+    assert not claude_home.exists()
+    assert not copilot_home.exists()
+
+
+@pytest.mark.subprocess
+def test_cli_validate_clean_exits_zero(run_cli, repo_root):
+    result = run_cli(['validate'], cwd=repo_root)
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.subprocess
+def test_cli_validate_drift_exits_one(repo_copy, run_cli):
+    drifted = repo_copy / 'agents' / 'scout.md'
+    drifted.write_text(drifted.read_text(encoding='utf-8') + 'x\n')
+
+    result = run_cli(['validate'], cwd=repo_copy)
+
+    assert result.returncode == 1
+    assert 'scout.md' in result.stdout + result.stderr
+
+
+@pytest.mark.subprocess
+def test_cli_sync_is_idempotent_on_clean_tree(repo_copy, run_cli):
+    result = run_cli(['sync'], cwd=repo_copy)
+
+    assert result.returncode == 0, result.stderr
+    assert validate(repo_copy) == []
+
+
+@pytest.mark.subprocess
+def test_cli_rejects_invalid_model(run_cli, repo_root):
+    result = run_cli(
+        ['install', '--target', 'claude', '--model', 'bad model!', '--dry-run'],
+        cwd=repo_root,
+    )
+
+    assert result.returncode != 0
+    assert 'model' in (result.stdout + result.stderr).lower()
+
+
+@pytest.mark.subprocess
+def test_cli_install_no_input_never_prompts(tmp_path, run_cli, repo_root):
+    """--no-input on a would-be-interactive run must not block on stdin."""
+    result = run_cli(
+        ['install', '--target', 'claude', '--dry-run', '--no-input'],
+        cwd=repo_root,
+        env_extra={'CLAUDE_CONFIG_DIR': str(tmp_path / 'claude-home')},
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.subprocess
+def test_cli_config_rejects_unknown_delivery_mode(tmp_path, run_cli, repo_root):
+    config = tmp_path / 'config.toml'
+    config.write_text('schema_version = 1\n[orchestration]\ndelivery_mode = "bogus"\n')
+
+    result = run_cli(
+        ['install', '--target', 'claude', '--dry-run', '--config', str(config)],
+        cwd=repo_root,
+    )
+
+    assert result.returncode != 0
+    assert 'orchestration.delivery_mode' in result.stdout + result.stderr

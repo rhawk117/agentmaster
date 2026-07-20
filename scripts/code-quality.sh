@@ -91,7 +91,7 @@ run_validate() {
     local failed=0
 
     log_step "installer parity validation"
-    if ! uv run python install.py validate --target all; then
+    if ! uv run python install.py validate; then
         log_error "Parity validation failed"
         failed=1
     fi
