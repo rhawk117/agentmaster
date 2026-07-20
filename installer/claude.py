@@ -23,7 +23,7 @@ from installer.render import render_worker
 if TYPE_CHECKING:
     from installer.actions import InstallReport
 
-_MODEL_SKILLS = frozenset({'agentmaster-plan', 'agentmaster-review'})
+_MODEL_SKILLS = frozenset({'agentmaster-plan', 'agentmaster-review', 'agentmaster-retro'})
 _COST_BOUNDARY_SOURCE = 'python3 "$HOME/.claude/agentmaster/hooks/cost_boundary.py"'
 _ROSTER = '^(scout|code-analyst|plan-critic|implementer|Explore)$'
 

@@ -110,11 +110,17 @@ If the task names a repository skill, instructions file, or tool under a
 
 MANIFEST = Manifest(
     workers=('scout', 'code-analyst', 'plan-critic', 'implementer'),
-    claude_skills=('agentmaster-plan', 'agentmaster-execute', 'agentmaster-review'),
+    claude_skills=(
+        'agentmaster-plan',
+        'agentmaster-execute',
+        'agentmaster-review',
+        'agentmaster-retro',
+    ),
     copilot_coordinators=(
         'agentmaster-plan',
         'agentmaster-execute',
         'agentmaster-review',
+        'agentmaster-retro',
     ),
     claude_only_agents=('explore',),
     claude_hooks=(
