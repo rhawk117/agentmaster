@@ -220,4 +220,8 @@ __marimo__/
 .streamlit/secrets.toml
 .claude/worktrees
 # agentmaster session artifacts (ledgers, telemetry, evidence, phase marker)
-.agentmaster/
+# (.agentmaster/* not .agentmaster/ so a directory-parent exclude doesn't
+# block the SPEC.md negation below from re-including that one file)
+.agentmaster/*
+# v2 spec is tracked; rest of the directory remains session workspace
+!.agentmaster/SPEC.md
