@@ -101,9 +101,7 @@ def test_compaction_context_defaults_when_payload_bare():
     ctx = hooklib.compaction_context({})
     assert ctx.agent_type == 'main'
     assert ctx.trigger == ''
-    assert ctx.threshold_percent == ''
-    assert ctx.pre_tokens == ''
-    assert ctx.post_tokens == ''
+    assert ctx.token_count == ''
     assert ctx.session_id == ''
 
 
@@ -117,27 +115,15 @@ def test_compaction_context_distinguishes_other_subagent():
     assert ctx.agent_type == 'scout'
 
 
-def test_compaction_context_extracts_trigger_and_threshold():
-    ctx = hooklib.compaction_context({'trigger': 'auto', 'threshold_percent': 50})
+def test_compaction_context_extracts_trigger_and_token_count():
+    ctx = hooklib.compaction_context({'trigger': 'auto', 'token_count': 9000})
     assert ctx.trigger == 'auto'
-    assert ctx.threshold_percent == '50'
+    assert ctx.token_count == '9000'
 
 
-def test_compaction_context_extracts_threshold_alt_key():
-    ctx = hooklib.compaction_context({'auto_compact_percent': 75})
-    assert ctx.threshold_percent == '75'
-
-
-def test_compaction_context_extracts_tokens():
-    ctx = hooklib.compaction_context({'pre_tokens': 9000, 'post_tokens': 500})
-    assert ctx.pre_tokens == '9000'
-    assert ctx.post_tokens == '500'
-
-
-def test_compaction_context_extracts_tokens_alt_keys():
-    ctx = hooklib.compaction_context({'tokens_before': 111, 'tokens_after': 22})
-    assert ctx.pre_tokens == '111'
-    assert ctx.post_tokens == '22'
+def test_compaction_context_extracts_token_count_alt_key():
+    ctx = hooklib.compaction_context({'pre_tokens': 111})
+    assert ctx.token_count == '111'
 
 
 def test_compaction_context_extracts_session_identifier():
