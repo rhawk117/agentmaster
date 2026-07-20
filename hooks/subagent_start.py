@@ -10,7 +10,7 @@ def main() -> int:
     hooklib.debug_dump(payload)
     aid = payload.get('agent_id') or ''
     if aid:
-        starts = hooklib.agentmaster_dir(payload) / '.starts'
+        starts = hooklib.session_dir(payload) / '.starts'
         starts.mkdir(parents=True, exist_ok=True)
         (starts / aid).write_text(str(time.time()))
     return 0
