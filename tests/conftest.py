@@ -6,12 +6,39 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from installer.manifest import Manifest
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Substrings identifying environment variables that must not leak from the
+# developer/CI host into subprocess-driven tests (Claude, Copilot, Agentmaster
+# home, ledger, compaction, debug, GitHub, and token variables).
+_ENV_SCRUB_SUBSTRINGS = (
+    'CLAUDE',
+    'COPILOT',
+    'AGENTMASTER',
+    'LEDGER',
+    'COMPACT',
+    'DEBUG',
+    'GITHUB',
+    'GH_',
+    'TOKEN',
+)
+
+
+def _scrubbed_base_env() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not any(needle in key.upper() for needle in _ENV_SCRUB_SUBSTRINGS)
+    }
 
 
 @pytest.fixture(scope='session')
@@ -34,18 +61,18 @@ def repo_copy(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(scope='session')
-def statuses():
-    def _statuses(entries) -> list[str]:
+def statuses() -> Callable[[list[tuple[str, Path]]], list[str]]:
+    def _statuses(entries: list[tuple[str, Path]]) -> list[str]:
         return [status for status, _ in entries]
 
     return _statuses
 
 
 @pytest.fixture
-def make_manifest():
+def make_manifest() -> Callable[..., Manifest]:
     """Factory for fake Manifests; every field defaults to empty."""
 
-    def _make(**overrides) -> Manifest:
+    def _make(**overrides: object) -> Manifest:
         fields: dict = {
             'workers': (),
             'claude_skills': (),
@@ -64,9 +91,13 @@ def make_manifest():
 
 
 @pytest.fixture
-def run_cli():
-    def _run(args, cwd, env_extra=None):
-        env = dict(os.environ)
+def run_cli() -> Callable[..., subprocess.CompletedProcess[str]]:
+    def _run(
+        args: list[str],
+        cwd: Path,
+        env_extra: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = _scrubbed_base_env()
         env.update(env_extra or {})
         return subprocess.run(  # noqa: S603
             [sys.executable, 'install.py', *args],
@@ -75,15 +106,23 @@ def run_cli():
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
 
     return _run
 
 
 @pytest.fixture
-def run_hook(tmp_path: Path):
-    def _run(name, payload, env=None, raw=None):
+def run_hook(tmp_path: Path) -> Callable[..., subprocess.CompletedProcess[str]]:
+    def _run(
+        name: str,
+        payload: object,
+        env_extra: Mapping[str, str] | None = None,
+        raw: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         stdin = raw if raw is not None else json.dumps(payload)
+        env = _scrubbed_base_env()
+        env.update(env_extra or {})
         return subprocess.run(  # noqa: S603
             [sys.executable, str(REPO_ROOT / 'hooks' / f'{name}.py')],
             input=stdin,
@@ -91,6 +130,7 @@ def run_hook(tmp_path: Path):
             text=True,
             cwd=tmp_path,
             env=env,
+            timeout=30,
             check=False,
         )
 

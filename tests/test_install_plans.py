@@ -106,6 +106,7 @@ def _plan(tmp_path) -> LedgerBootstrapPlan:
     )
 
 
+@pytest.mark.sqlite
 def test_bootstrap_creates_ledger_db_and_artifact_dir_with_safe_permissions(tmp_path):
     plan = _plan(tmp_path)
 
@@ -118,6 +119,7 @@ def test_bootstrap_creates_ledger_db_and_artifact_dir_with_safe_permissions(tmp_
     assert stat.S_IMODE(plan.artifact_path.stat().st_mode) == 0o700
 
 
+@pytest.mark.sqlite
 def test_bootstrap_is_idempotent(tmp_path):
     plan = _plan(tmp_path)
 
@@ -136,6 +138,7 @@ def test_bootstrap_dry_run_creates_nothing(tmp_path):
     assert not plan.artifact_path.exists()
 
 
+@pytest.mark.sqlite
 def test_bootstrap_refuses_newer_schema(tmp_path):
     plan = _plan(tmp_path)
     plan.ledger_path.parent.mkdir(parents=True)
@@ -225,6 +228,7 @@ def test_resolve_auto_compact_prompts_when_interactive():
     assert (percent, clear) == (75, False)
 
 
+@pytest.mark.sqlite
 def test_bootstrap_dry_run_still_validates_existing_newer_schema(tmp_path):
     plan = _plan(tmp_path)
     plan.ledger_path.parent.mkdir(parents=True)

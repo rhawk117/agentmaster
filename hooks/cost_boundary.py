@@ -32,7 +32,7 @@ def _is_exempt(target: str, root: Path) -> bool:
     """True when target lies outside the workspace or under .agentmaster/."""
     try:
         resolved = (root / target).resolve()
-    except Exception:
+    except OSError, RuntimeError:
         return False
     if not resolved.is_relative_to(root):
         return True

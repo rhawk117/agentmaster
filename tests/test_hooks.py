@@ -1,7 +1,6 @@
 """Tests for the agentmaster lifecycle hook scripts."""
 
 import json
-import os
 import time
 
 import pytest
@@ -134,8 +133,9 @@ def test_precompact_snapshot_writes_debug_dump_when_enabled(tmp_path, run_hook):
     am.mkdir()
     (am / 'ledger.md').write_text('evidence')
     payload = {'cwd': str(tmp_path), 'trigger': 'auto'}
-    env = {**os.environ, 'AGENTMASTER_HOOK_DEBUG': '1'}
-    result = run_hook('precompact_snapshot', payload, env=env)
+    result = run_hook(
+        'precompact_snapshot', payload, env_extra={'AGENTMASTER_HOOK_DEBUG': '1'}
+    )
     assert result.returncode == 0
     assert '"trigger": "auto"' in (am / 'hook-debug.jsonl').read_text()
 
@@ -220,15 +220,15 @@ def test_cost_boundary_noop_without_marker(tmp_path, run_hook):
 
 
 def test_dispatch_guard_blocks_when_env_set(run_hook):
-    env = {**os.environ, 'CLAUDE_CODE_SUBAGENT_MODEL': 'haiku'}
-    result = run_hook('dispatch_guard', {}, env=env)
+    result = run_hook(
+        'dispatch_guard', {}, env_extra={'CLAUDE_CODE_SUBAGENT_MODEL': 'haiku'}
+    )
     assert result.returncode == 2
     assert 'CLAUDE_CODE_SUBAGENT_MODEL' in result.stderr
 
 
 def test_dispatch_guard_allows_when_unset(run_hook):
-    env = {k: v for k, v in os.environ.items() if k != 'CLAUDE_CODE_SUBAGENT_MODEL'}
-    result = run_hook('dispatch_guard', {}, env=env)
+    result = run_hook('dispatch_guard', {})
     assert result.returncode == 0
 
 

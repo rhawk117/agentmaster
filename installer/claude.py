@@ -11,6 +11,7 @@ them back together.
 import json
 import os
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,10 +19,9 @@ from installer import agentmaster_config, claude_settings, managed_state
 from installer.actions import FilePlan, apply_plans, remove_paths
 from installer.config import (
     DEFAULT_ROLE_EFFORT,
+    AutoCompactOverride,
     ClaudeRoleConfig,
-    DeliveryMode,
-    RawCapture,
-    RedactionMode,
+    ResolvedConfig,
     Role,
     RoleOverride,
 )
@@ -175,17 +175,9 @@ def _hook_events(home: Path) -> dict[str, list[dict]]:
 
 def _managed_plans(
     home: Path,
-    agentmaster_home: Path,
     roles: ClaudeRoleConfig,
-    *,
-    ledger_path: Path,
-    artifact_path: Path,
-    ledger_enabled: bool,
-    delivery_mode: DeliveryMode,
-    raw_capture: RawCapture,
-    redaction: RedactionMode,
-    auto_compact_percent: int | None,
-    clear_auto_compact_override: bool,
+    resolved: ResolvedConfig,
+    auto_compact: AutoCompactOverride,
 ) -> list[FilePlan]:
     """Compute the settings.json / config.toml / owned-state.json plans.
 
@@ -193,6 +185,7 @@ def _managed_plans(
     malformed content) before any write; the caller folds the result into
     the same `apply_plans` batch as the skill/agent/hook plans.
     """
+    agentmaster_home = resolved.agentmaster_home.resolve()
     settings_path = home / 'settings.json'
     settings_text = _read_text(settings_path)
     settings = (
@@ -214,13 +207,13 @@ def _managed_plans(
     new_owned_state = owned_state.with_value('claude', 'hooks', new_owned_hooks)
 
     owned_auto_compact = _owned_auto_compact(owned_state)
-    if auto_compact_percent is not None:
+    if auto_compact.percent is not None:
         new_settings, new_owned_auto_compact = (
             claude_settings.merge_auto_compact_override(
-                new_settings, owned=owned_auto_compact, percent=auto_compact_percent
+                new_settings, owned=owned_auto_compact, percent=auto_compact.percent
             )
         )
-    elif clear_auto_compact_override:
+    elif auto_compact.clear:
         new_settings = claude_settings.strip_auto_compact_override(
             new_settings, owned_auto_compact
         )
@@ -233,18 +226,18 @@ def _managed_plans(
 
     config_path = agentmaster_home / 'config.toml'
     config_plan = agentmaster_config.AgentmasterConfigPlan(
-        ledger_path=str(ledger_path),
-        artifact_path=str(artifact_path),
-        ledger_enabled=ledger_enabled,
-        delivery_mode=delivery_mode.value,
+        ledger_path=str(resolved.ledger_path),
+        artifact_path=str(resolved.artifact_path),
+        ledger_enabled=resolved.ledger_enabled,
+        delivery_mode=resolved.delivery_mode.value,
         orchestrator_model=roles.orchestrator.model,
         orchestrator_effort=_effort_value(roles.orchestrator, Role.ORCHESTRATOR),
         implementer_model=roles.implementer.model,
         implementer_effort=_effort_value(roles.implementer, Role.IMPLEMENTER),
         reviewer_model=roles.reviewer.model,
         reviewer_effort=_effort_value(roles.reviewer, Role.REVIEWER),
-        raw_capture=raw_capture.value,
-        redaction=redaction.value,
+        raw_capture=resolved.raw_capture.value,
+        redaction=resolved.redaction.value,
     )
     config_text = agentmaster_config.render_config(
         config_plan, existing_text=_read_text(config_path)
@@ -279,23 +272,19 @@ def _strip_settings(home: Path, agentmaster_home: Path) -> dict | None:
     )
 
 
-def install(
-    root: Path,
-    home: Path,
-    *,
-    roles: ClaudeRoleConfig,
-    agentmaster_home: Path,
-    ledger_path: Path,
-    artifact_path: Path,
-    ledger_enabled: bool,
-    delivery_mode: DeliveryMode,
-    raw_capture: RawCapture,
-    redaction: RedactionMode,
-    dry_run: bool,
-    auto_compact_percent: int | None = None,
-    clear_auto_compact_override: bool = False,
-    manifest: Manifest = MANIFEST,
-) -> InstallReport:
+@dataclass(frozen=True, slots=True)
+class ClaudeInstallOptions:
+    """Per-call Claude installer inputs beyond the source root and target home."""
+
+    roles: ClaudeRoleConfig
+    resolved: ResolvedConfig
+    auto_compact: AutoCompactOverride = field(
+        default_factory=lambda: AutoCompactOverride(None, False)
+    )
+    manifest: Manifest = MANIFEST
+
+
+def install(root: Path, home: Path, options: ClaudeInstallOptions) -> InstallReport:
     """Install skills, workers, hooks, and managed settings/config transactionally.
 
     `settings.json`, Agentmaster's `config.toml`, and the owned-state
@@ -304,27 +293,20 @@ def install(
     outside the plan, and a failure partway through rolls all of them back.
     """
     home = home.resolve()
-    agentmaster_home = agentmaster_home.resolve()
+    roles, resolved, auto_compact, manifest = (
+        options.roles,
+        options.resolved,
+        options.auto_compact,
+        options.manifest,
+    )
     _preflight(root, manifest)
     plans = [
         *_skill_plans(root, home, roles, manifest),
         *_agent_plans(root, home, roles, manifest),
         *_hook_plans(root, home, manifest),
-        *_managed_plans(
-            home,
-            agentmaster_home,
-            roles,
-            ledger_path=ledger_path,
-            artifact_path=artifact_path,
-            ledger_enabled=ledger_enabled,
-            delivery_mode=delivery_mode,
-            raw_capture=raw_capture,
-            redaction=redaction,
-            auto_compact_percent=auto_compact_percent,
-            clear_auto_compact_override=clear_auto_compact_override,
-        ),
+        *_managed_plans(home, roles, resolved, auto_compact),
     ]
-    return apply_plans(plans, backup_root=home, dry_run=dry_run)
+    return apply_plans(plans, backup_root=home, dry_run=resolved.dry_run)
 
 
 def uninstall(

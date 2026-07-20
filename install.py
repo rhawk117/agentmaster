@@ -50,6 +50,7 @@ from installer.config import (
     ResolvedConfig,
     Role,
     RoleOverride,
+    RolePromptContext,
     Target,
     UnresolvedConfig,
     load_config_document,
@@ -209,6 +210,10 @@ def _warn_superpowers(target: Target, home: Path) -> None:
 def _resolve_claude_roles(
     unresolved: UnresolvedConfig, *, is_tty: bool
 ) -> ClaudeRoleConfig:
+    context = RolePromptContext(
+        no_input=unresolved.no_input, is_tty=is_tty, prompt=_prompt_role
+    )
+
     def _role(
         role: Role, model: str | None, effort: Effort | None = None
     ) -> RoleOverride:
@@ -217,9 +222,7 @@ def _resolve_claude_roles(
             Target.CLAUDE,
             explicit_model=model,
             explicit_effort=effort,
-            no_input=unresolved.no_input,
-            is_tty=is_tty,
-            prompt=_prompt_role,
+            context=context,
         )
 
     return ClaudeRoleConfig(
@@ -243,15 +246,17 @@ def _resolve_claude_roles(
 def _resolve_copilot_roles(
     unresolved: UnresolvedConfig, *, is_tty: bool
 ) -> CopilotRoleConfig:
+    context = RolePromptContext(
+        no_input=unresolved.no_input, is_tty=is_tty, prompt=_prompt_role
+    )
+
     def _role(role: Role, model: str | None) -> RoleOverride:
         return resolve_role(
             role,
             Target.COPILOT,
             explicit_model=model,
             explicit_effort=None,
-            no_input=unresolved.no_input,
-            is_tty=is_tty,
-            prompt=_prompt_role,
+            context=context,
         )
 
     return CopilotRoleConfig(
@@ -316,7 +321,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
         try:
             if target is Target.CLAUDE:
                 roles = _resolve_claude_roles(unresolved, is_tty=is_tty)
-                auto_compact_percent, clear_auto_compact_override = resolve_auto_compact(
+                auto_compact = resolve_auto_compact(
                     explicit_percent=unresolved.auto_compact_percent,
                     explicit_clear=unresolved.clear_auto_compact_override,
                     no_input=unresolved.no_input,
@@ -326,17 +331,9 @@ def _cmd_install(args: argparse.Namespace) -> int:
                 report = claude.install(
                     ROOT,
                     home,
-                    roles=roles,
-                    agentmaster_home=resolved.agentmaster_home,
-                    ledger_path=resolved.ledger_path,
-                    artifact_path=resolved.artifact_path,
-                    ledger_enabled=resolved.ledger_enabled,
-                    delivery_mode=resolved.delivery_mode,
-                    raw_capture=resolved.raw_capture,
-                    redaction=resolved.redaction,
-                    auto_compact_percent=auto_compact_percent,
-                    clear_auto_compact_override=clear_auto_compact_override,
-                    dry_run=resolved.dry_run,
+                    claude.ClaudeInstallOptions(
+                        roles=roles, resolved=resolved, auto_compact=auto_compact
+                    ),
                 )
             else:
                 roles = _resolve_copilot_roles(unresolved, is_tty=is_tty)
