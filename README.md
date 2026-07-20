@@ -55,6 +55,20 @@ local|commit|pull-request|merge` sets how a run may publish its changes.
 Dry-run and a disabled ledger never create a directory, database, or
 artifact.
 
+`--auto-compact-percent 1-100` (Claude only) sets
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`; `--clear-auto-compact-override` removes
+an Agentmaster-managed override instead (the two are mutually exclusive). An
+interactive install without either flag offers preserving current/default
+behavior, setting 50% (recommended for long Agentmaster execution
+sessions), a custom percentage, or clearing an existing override; a
+noninteractive install without either flag leaves current behavior
+untouched. This affects the main Claude conversation and all subagents.
+Earlier compaction reduces working-context pressure but may discard detail
+and disrupt cache continuity; it is not a per-implementer control. On
+reinstall the original pre-Agentmaster value is preserved, and clearing or
+uninstalling restores it only while Agentmaster still owns the current
+value.
+
 After a Claude Code install, restart once if `~/.claude/skills/` or
 `~/.claude/agents/` were newly created. Keep `CLAUDE_CODE_SUBAGENT_MODEL`
 unset: it silently overrides every worker's model pin, and the shipped

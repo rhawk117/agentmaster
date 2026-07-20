@@ -3,9 +3,12 @@
 import pytest
 
 from installer.claude_settings import (
+    AUTO_COMPACT_ENV_KEY,
     ClaudeSettingsError,
     is_ours,
+    merge_auto_compact_override,
     merge_hook_events,
+    strip_auto_compact_override,
     strip_hook_events,
     validate_settings,
 )
@@ -137,3 +140,69 @@ def test_strip_hook_events_preserves_user_edited_formerly_owned_entry():
     stripped = strip_hook_events(settings, {'PreToolUse': [owned_entry]})
 
     assert stripped['hooks']['PreToolUse'] == [edited_entry]
+
+
+def test_merge_auto_compact_override_sets_percent_and_captures_original():
+    settings = {'env': {AUTO_COMPACT_ENV_KEY: 'user-set-value'}}
+
+    new_settings, new_owned = merge_auto_compact_override(
+        settings, owned=None, percent=50
+    )
+
+    assert new_settings['env'][AUTO_COMPACT_ENV_KEY] == '50'
+    assert new_owned == {'value': '50', 'original': 'user-set-value'}
+
+
+def test_merge_auto_compact_override_captures_absent_original_as_none():
+    new_settings, new_owned = merge_auto_compact_override({}, owned=None, percent=25)
+
+    assert new_settings['env'][AUTO_COMPACT_ENV_KEY] == '25'
+    assert new_owned == {'value': '25', 'original': None}
+
+
+def test_merge_auto_compact_override_preserves_original_across_reinstall():
+    settings = {'env': {AUTO_COMPACT_ENV_KEY: '50'}}
+    owned = {'value': '50', 'original': 'user-set-value'}
+
+    new_settings, new_owned = merge_auto_compact_override(
+        settings, owned=owned, percent=75
+    )
+
+    assert new_settings['env'][AUTO_COMPACT_ENV_KEY] == '75'
+    assert new_owned == {'value': '75', 'original': 'user-set-value'}
+
+
+def test_strip_auto_compact_override_restores_original_value():
+    settings = {'env': {AUTO_COMPACT_ENV_KEY: '50'}}
+    owned = {'value': '50', 'original': 'user-set-value'}
+
+    stripped = strip_auto_compact_override(settings, owned)
+
+    assert stripped['env'][AUTO_COMPACT_ENV_KEY] == 'user-set-value'
+
+
+def test_strip_auto_compact_override_removes_key_when_no_original():
+    settings = {'env': {AUTO_COMPACT_ENV_KEY: '50'}}
+    owned = {'value': '50', 'original': None}
+
+    stripped = strip_auto_compact_override(settings, owned)
+
+    assert AUTO_COMPACT_ENV_KEY not in stripped['env']
+
+
+def test_strip_auto_compact_override_leaves_user_edited_value_alone():
+    """The Claude-settings analogue of the hooks fix: a later user edit survives."""
+    settings = {'env': {AUTO_COMPACT_ENV_KEY: 'user-changed-it'}}
+    owned = {'value': '50', 'original': None}
+
+    stripped = strip_auto_compact_override(settings, owned)
+
+    assert stripped['env'][AUTO_COMPACT_ENV_KEY] == 'user-changed-it'
+
+
+def test_strip_auto_compact_override_no_owned_state_is_a_noop():
+    settings = {'env': {AUTO_COMPACT_ENV_KEY: '50'}}
+
+    stripped = strip_auto_compact_override(settings, None)
+
+    assert stripped['env'][AUTO_COMPACT_ENV_KEY] == '50'

@@ -12,6 +12,8 @@ Commands:
                                  [--copilot-implementer-model NAME]
                                  [--ledger-path PATH] [--no-ledger] [--artifact-dir PATH]
                                  [--delivery-mode local|commit|pull-request|merge]
+                                 [--auto-compact-percent 1-100]
+                                 [--clear-auto-compact-override]
                                  [--config PATH] [--agentmaster-home PATH]
     python install.py uninstall --target claude|copilot|all [--dry-run]
     python install.py validate
@@ -25,6 +27,10 @@ no orchestrator/reviewer roles and never gets an effort field.
 Destinations honor `CLAUDE_CONFIG_DIR` / `COPILOT_CONFIG_DIR` and the
 `--claude-dir` / `--copilot-dir` overrides. `--config` loads a versioned
 TOML file (schema in SPEC.md §12); explicit CLI flags always win over it.
+`--auto-compact-percent` (Claude only, 1-100) and
+`--clear-auto-compact-override` (mutually exclusive) manage
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`; this affects the main Claude conversation
+and all subagents, so omitting both flags leaves current behavior untouched.
 Exit code is 0 on success, 1 on any failure or validation finding.
 """
 
@@ -48,7 +54,9 @@ from installer.config import (
     UnresolvedConfig,
     load_config_document,
     resolve,
+    resolve_auto_compact,
     resolve_role,
+    validate_auto_compact_flags,
     validate_ledger_flags,
     validate_role_flags,
 )
@@ -99,6 +107,29 @@ def _prompt_role(
     choices = '/'.join(effort.value for effort in Effort)
     raw_effort = input(f'  effort ({choices}) [{default_effort}]: ').strip()
     return model, Effort(raw_effort) if raw_effort else default_effort
+
+
+_AUTO_COMPACT_NOTE = (
+    'This affects the main Claude conversation and all subagents. Earlier '
+    'compaction reduces working-context pressure but may discard detail and '
+    'disrupt cache continuity; it is not a per-implementer control.'
+)
+
+
+def _prompt_auto_compact() -> tuple[int | None, bool]:
+    print(f'Claude auto-compaction override: {_AUTO_COMPACT_NOTE}')
+    print('  1) preserve current/default behavior')
+    print('  2) set 50% (recommended for long Agentmaster execution sessions)')
+    print('  3) set a custom percentage')
+    print('  4) clear an existing Agentmaster-managed override')
+    choice = input('  choice [1]: ').strip() or '1'
+    if choice == '2':
+        return 50, False
+    if choice == '3':
+        return int(input('  percent (1-100): ').strip()), False
+    if choice == '4':
+        return None, True
+    return None, False
 
 
 def _reject_removed_model_flag(argv: list[str]) -> bool:
@@ -152,6 +183,8 @@ def _unresolved_config(args: argparse.Namespace) -> UnresolvedConfig:
         delivery_mode=DeliveryMode(args.delivery_mode)
         if getattr(args, 'delivery_mode', None)
         else None,
+        auto_compact_percent=getattr(args, 'auto_compact_percent', None),
+        clear_auto_compact_override=getattr(args, 'clear_auto_compact_override', False),
     )
 
 
@@ -264,6 +297,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
     try:
         validate_role_flags(unresolved)
         validate_ledger_flags(unresolved)
+        validate_auto_compact_flags(unresolved)
         resolved = resolve(unresolved, document)
     except ConfigError as error:
         print(f'invalid config: {error}', file=sys.stderr)
@@ -282,6 +316,13 @@ def _cmd_install(args: argparse.Namespace) -> int:
         try:
             if target is Target.CLAUDE:
                 roles = _resolve_claude_roles(unresolved, is_tty=is_tty)
+                auto_compact_percent, clear_auto_compact_override = resolve_auto_compact(
+                    explicit_percent=unresolved.auto_compact_percent,
+                    explicit_clear=unresolved.clear_auto_compact_override,
+                    no_input=unresolved.no_input,
+                    is_tty=is_tty,
+                    prompt=_prompt_auto_compact,
+                )
                 report = claude.install(
                     ROOT,
                     home,
@@ -293,6 +334,8 @@ def _cmd_install(args: argparse.Namespace) -> int:
                     delivery_mode=resolved.delivery_mode,
                     raw_capture=resolved.raw_capture,
                     redaction=resolved.redaction,
+                    auto_compact_percent=auto_compact_percent,
+                    clear_auto_compact_override=clear_auto_compact_override,
                     dry_run=resolved.dry_run,
                 )
             else:
@@ -374,6 +417,11 @@ def _add_ledger_arguments(cmd: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_auto_compact_arguments(cmd: argparse.ArgumentParser) -> None:
+    cmd.add_argument('--auto-compact-percent', type=int, default=None)
+    cmd.add_argument('--clear-auto-compact-override', action='store_true')
+
+
 def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, Callable]]:
     parser = argparse.ArgumentParser(prog='install.py', description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -390,6 +438,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, Callable]]:
         if name == 'install':
             _add_role_arguments(cmd)
             _add_ledger_arguments(cmd)
+            _add_auto_compact_arguments(cmd)
             cmd.add_argument('--config', default=None)
             cmd.add_argument('--agentmaster-home', default=None)
             cmd.add_argument('--no-input', action='store_true')

@@ -5,6 +5,8 @@ error messages, and stdout/stderr formatting are covered end to end. Parity
 tests (generated-file/source equivalence) live in tests/test_parity.py.
 """
 
+import json
+
 import pytest
 
 from installer.parity import validate
@@ -94,6 +96,67 @@ def test_cli_rejects_claude_flag_without_claude_target(run_cli, repo_root):
 
     assert result.returncode != 0
     assert '--claude-implementer-model' in (result.stdout + result.stderr)
+
+
+@pytest.mark.subprocess
+def test_cli_rejects_auto_compact_percent_without_claude_target(run_cli, repo_root):
+    result = run_cli(
+        ['install', '--target', 'copilot', '--auto-compact-percent', '50', '--dry-run'],
+        cwd=repo_root,
+    )
+
+    assert result.returncode != 0
+    assert '--auto-compact-percent' in (result.stdout + result.stderr)
+
+
+@pytest.mark.subprocess
+def test_cli_rejects_clear_auto_compact_override_without_claude_target(
+    run_cli, repo_root
+):
+    result = run_cli(
+        ['install', '--target', 'copilot', '--clear-auto-compact-override', '--dry-run'],
+        cwd=repo_root,
+    )
+
+    assert result.returncode != 0
+    assert '--clear-auto-compact-override' in (result.stdout + result.stderr)
+
+
+@pytest.mark.subprocess
+def test_cli_rejects_auto_compact_percent_out_of_range(run_cli, repo_root):
+    result = run_cli(
+        ['install', '--target', 'claude', '--auto-compact-percent', '101', '--dry-run'],
+        cwd=repo_root,
+    )
+
+    assert result.returncode != 0
+    assert 'auto-compact-percent' in (result.stdout + result.stderr)
+
+
+@pytest.mark.subprocess
+def test_cli_install_auto_compact_percent_writes_env_override(
+    tmp_path, run_cli, repo_root
+):
+    result = run_cli(
+        [
+            'install',
+            '--target',
+            'claude',
+            '--no-input',
+            '--auto-compact-percent',
+            '50',
+            '--agentmaster-home',
+            str(tmp_path / 'agentmaster-home'),
+        ],
+        cwd=repo_root,
+        env_extra={'CLAUDE_CONFIG_DIR': str(tmp_path / 'claude-home')},
+    )
+
+    assert result.returncode == 0, result.stderr
+    settings = json.loads(
+        (tmp_path / 'claude-home' / 'settings.json').read_text(encoding='utf-8')
+    )
+    assert settings['env']['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'] == '50'
 
 
 @pytest.mark.subprocess

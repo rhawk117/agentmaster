@@ -1,9 +1,9 @@
-"""Tests for ledger-aware installer planning (SPEC.md §11, §16.1).
+"""Tests for ledger-aware installer planning (SPEC.md §11, §15, §16.1).
 
-Covers `installer.config` ledger/artifact/delivery-mode resolution and
-`installer.ledger_bootstrap`'s idempotent, permission-safe, schema-aware
-placeholder bootstrap. CLI-surface (subprocess) coverage lives in
-tests/test_cli.py.
+Covers `installer.config` ledger/artifact/delivery-mode/auto-compact
+resolution and `installer.ledger_bootstrap`'s idempotent, permission-safe,
+schema-aware placeholder bootstrap. CLI-surface (subprocess) coverage lives
+in tests/test_cli.py.
 """
 
 import sqlite3
@@ -17,6 +17,8 @@ from installer.config import (
     Target,
     UnresolvedConfig,
     resolve,
+    resolve_auto_compact,
+    validate_auto_compact_flags,
     validate_ledger_flags,
 )
 from installer.ledger_bootstrap import (
@@ -146,6 +148,81 @@ def test_bootstrap_refuses_newer_schema(tmp_path):
         bootstrap(plan, dry_run=False)
 
     assert not plan.artifact_path.exists()
+
+
+def test_validate_auto_compact_flags_rejects_percent_out_of_range():
+    unresolved = _unresolved(target=Target.CLAUDE, auto_compact_percent=0)
+
+    with pytest.raises(ConfigError, match='auto-compact-percent'):
+        validate_auto_compact_flags(unresolved)
+
+    unresolved = _unresolved(target=Target.CLAUDE, auto_compact_percent=101)
+    with pytest.raises(ConfigError, match='auto-compact-percent'):
+        validate_auto_compact_flags(unresolved)
+
+
+def test_validate_auto_compact_flags_accepts_boundary_values():
+    validate_auto_compact_flags(
+        _unresolved(target=Target.CLAUDE, auto_compact_percent=1)
+    )  # no raise
+    validate_auto_compact_flags(
+        _unresolved(target=Target.CLAUDE, auto_compact_percent=100)
+    )  # no raise
+
+
+def test_validate_auto_compact_flags_rejects_percent_with_clear():
+    unresolved = _unresolved(
+        target=Target.CLAUDE, auto_compact_percent=50, clear_auto_compact_override=True
+    )
+
+    with pytest.raises(ConfigError, match='auto-compact-percent'):
+        validate_auto_compact_flags(unresolved)
+
+
+def test_validate_auto_compact_flags_rejects_percent_without_claude_target():
+    unresolved = _unresolved(target=Target.COPILOT, auto_compact_percent=50)
+
+    with pytest.raises(ConfigError, match='auto-compact-percent'):
+        validate_auto_compact_flags(unresolved)
+
+
+def test_validate_auto_compact_flags_rejects_clear_without_claude_target():
+    unresolved = _unresolved(target=Target.COPILOT, clear_auto_compact_override=True)
+
+    with pytest.raises(ConfigError, match='clear-auto-compact-override'):
+        validate_auto_compact_flags(unresolved)
+
+
+def test_resolve_auto_compact_explicit_percent_wins():
+    percent, clear = resolve_auto_compact(
+        explicit_percent=50,
+        explicit_clear=False,
+        no_input=False,
+        is_tty=True,
+        prompt=lambda: (99, False),
+    )
+
+    assert (percent, clear) == (50, False)
+
+
+def test_resolve_auto_compact_noninteractive_preserves_behavior():
+    percent, clear = resolve_auto_compact(
+        explicit_percent=None, explicit_clear=False, no_input=True, is_tty=True
+    )
+
+    assert (percent, clear) == (None, False)
+
+
+def test_resolve_auto_compact_prompts_when_interactive():
+    percent, clear = resolve_auto_compact(
+        explicit_percent=None,
+        explicit_clear=False,
+        no_input=False,
+        is_tty=True,
+        prompt=lambda: (75, False),
+    )
+
+    assert (percent, clear) == (75, False)
 
 
 def test_bootstrap_dry_run_still_validates_existing_newer_schema(tmp_path):

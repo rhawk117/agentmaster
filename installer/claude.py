@@ -57,6 +57,15 @@ def _owned_hooks(owned_state: managed_state.OwnedState) -> dict[str, list]:
     }
 
 
+def _owned_auto_compact(
+    owned_state: managed_state.OwnedState,
+) -> dict[str, object] | None:
+    value = owned_state.get('claude', 'auto_compact')
+    if not isinstance(value, dict):
+        return None
+    return {key: val for key, val in value.items() if isinstance(key, str)}
+
+
 def _skill_overrides(skill: str, roles: ClaudeRoleConfig) -> dict[str, str] | None:
     role = _SKILL_ROLE.get(skill)
     if role is Role.COORDINATOR:
@@ -175,6 +184,8 @@ def _managed_plans(
     delivery_mode: DeliveryMode,
     raw_capture: RawCapture,
     redaction: RedactionMode,
+    auto_compact_percent: int | None,
+    clear_auto_compact_override: bool,
 ) -> list[FilePlan]:
     """Compute the settings.json / config.toml / owned-state.json plans.
 
@@ -201,6 +212,24 @@ def _managed_plans(
         marker=marker,
     )
     new_owned_state = owned_state.with_value('claude', 'hooks', new_owned_hooks)
+
+    owned_auto_compact = _owned_auto_compact(owned_state)
+    if auto_compact_percent is not None:
+        new_settings, new_owned_auto_compact = (
+            claude_settings.merge_auto_compact_override(
+                new_settings, owned=owned_auto_compact, percent=auto_compact_percent
+            )
+        )
+    elif clear_auto_compact_override:
+        new_settings = claude_settings.strip_auto_compact_override(
+            new_settings, owned_auto_compact
+        )
+        new_owned_auto_compact = None
+    else:
+        new_owned_auto_compact = owned_auto_compact
+    new_owned_state = new_owned_state.with_value(
+        'claude', 'auto_compact', new_owned_auto_compact
+    )
 
     config_path = agentmaster_home / 'config.toml'
     config_plan = agentmaster_config.AgentmasterConfigPlan(
@@ -244,7 +273,10 @@ def _strip_settings(home: Path, agentmaster_home: Path) -> dict | None:
         return None
     settings = claude_settings.validate_settings(json.loads(settings_text))
     owned_state = managed_state.parse(_read_text(agentmaster_home / 'owned-state.json'))
-    return claude_settings.strip_hook_events(settings, _owned_hooks(owned_state))
+    stripped = claude_settings.strip_hook_events(settings, _owned_hooks(owned_state))
+    return claude_settings.strip_auto_compact_override(
+        stripped, _owned_auto_compact(owned_state)
+    )
 
 
 def install(
@@ -260,6 +292,8 @@ def install(
     raw_capture: RawCapture,
     redaction: RedactionMode,
     dry_run: bool,
+    auto_compact_percent: int | None = None,
+    clear_auto_compact_override: bool = False,
     manifest: Manifest = MANIFEST,
 ) -> InstallReport:
     """Install skills, workers, hooks, and managed settings/config transactionally.
@@ -286,6 +320,8 @@ def install(
             delivery_mode=delivery_mode,
             raw_capture=raw_capture,
             redaction=redaction,
+            auto_compact_percent=auto_compact_percent,
+            clear_auto_compact_override=clear_auto_compact_override,
         ),
     ]
     return apply_plans(plans, backup_root=home, dry_run=dry_run)
