@@ -120,3 +120,98 @@ def test_cli_config_rejects_unknown_delivery_mode(tmp_path, run_cli, repo_root):
 
     assert result.returncode != 0
     assert 'orchestration.delivery_mode' in result.stdout + result.stderr
+
+
+@pytest.mark.subprocess
+def test_cli_rejects_no_ledger_with_ledger_path(tmp_path, run_cli, repo_root):
+    result = run_cli(
+        [
+            'install',
+            '--target',
+            'claude',
+            '--dry-run',
+            '--no-ledger',
+            '--ledger-path',
+            str(tmp_path / 'ledger.sqlite3'),
+        ],
+        cwd=repo_root,
+    )
+
+    assert result.returncode != 0
+    assert 'no-ledger' in (result.stdout + result.stderr)
+
+
+@pytest.mark.subprocess
+def test_cli_install_dry_run_creates_no_ledger(tmp_path, run_cli, repo_root):
+    agentmaster_home = tmp_path / 'agentmaster-home'
+
+    result = run_cli(
+        [
+            'install',
+            '--target',
+            'claude',
+            '--dry-run',
+            '--no-input',
+            '--agentmaster-home',
+            str(agentmaster_home),
+        ],
+        cwd=repo_root,
+        env_extra={'CLAUDE_CONFIG_DIR': str(tmp_path / 'claude-home')},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not agentmaster_home.exists()
+
+
+@pytest.mark.subprocess
+def test_cli_install_no_ledger_creates_no_ledger_file(tmp_path, run_cli, repo_root):
+    agentmaster_home = tmp_path / 'agentmaster-home'
+
+    result = run_cli(
+        [
+            'install',
+            '--target',
+            'claude',
+            '--no-input',
+            '--no-ledger',
+            '--agentmaster-home',
+            str(agentmaster_home),
+        ],
+        cwd=repo_root,
+        env_extra={'CLAUDE_CONFIG_DIR': str(tmp_path / 'claude-home')},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not (agentmaster_home / 'ledger.sqlite3').exists()
+
+
+@pytest.mark.subprocess
+def test_cli_install_ledger_path_and_artifact_dir_are_resolved(
+    tmp_path, run_cli, repo_root
+):
+    agentmaster_home = tmp_path / 'agentmaster-home'
+    ledger_path = tmp_path / 'custom-ledger.sqlite3'
+    artifact_dir = tmp_path / 'custom-artifacts'
+
+    result = run_cli(
+        [
+            'install',
+            '--target',
+            'claude',
+            '--no-input',
+            '--agentmaster-home',
+            str(agentmaster_home),
+            '--ledger-path',
+            str(ledger_path),
+            '--artifact-dir',
+            str(artifact_dir),
+        ],
+        cwd=repo_root,
+        env_extra={'CLAUDE_CONFIG_DIR': str(tmp_path / 'claude-home')},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert ledger_path.is_file()
+    assert artifact_dir.is_dir()
+    assert str(ledger_path) in result.stdout
+    assert str(artifact_dir) in result.stdout

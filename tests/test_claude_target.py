@@ -42,11 +42,15 @@ def install(
     root, home, *, roles=None, dry_run=False, manifest=None, agentmaster_home=None
 ):
     kwargs = {} if manifest is None else {'manifest': manifest}
+    resolved_agentmaster_home = agentmaster_home or (home.parent / 'agentmaster-home')
     return _claude_install(
         root,
         home,
         roles=roles or _roles(),
-        agentmaster_home=agentmaster_home or (home.parent / 'agentmaster-home'),
+        agentmaster_home=resolved_agentmaster_home,
+        ledger_path=resolved_agentmaster_home / 'ledger.sqlite3',
+        artifact_path=resolved_agentmaster_home / 'artifacts',
+        ledger_enabled=True,
         delivery_mode=DeliveryMode.LOCAL,
         raw_capture=RawCapture.FAILURES,
         redaction=RedactionMode.STANDARD,

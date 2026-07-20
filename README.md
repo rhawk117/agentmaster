@@ -47,6 +47,14 @@ events it merges into `settings.json` are merged idempotently, never
 clobbering hooks you already have. The superpowers-plugin check prints the
 exact install commands when the plugin is missing.
 
+The ledger (`~/.agentmaster/ledger.sqlite3` by default) and its artifact
+store are enabled by default with structured metadata; `--ledger-path` and
+`--artifact-dir` relocate them, `--no-ledger` disables both (`--no-ledger`
+and `--ledger-path` together are rejected), and `--delivery-mode
+local|commit|pull-request|merge` sets how a run may publish its changes.
+Dry-run and a disabled ledger never create a directory, database, or
+artifact.
+
 After a Claude Code install, restart once if `~/.claude/skills/` or
 `~/.claude/agents/` were newly created. Keep `CLAUDE_CODE_SUBAGENT_MODEL`
 unset: it silently overrides every worker's model pin, and the shipped

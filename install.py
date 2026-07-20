@@ -10,6 +10,8 @@ Commands:
                                  [--claude-review-model NAME]
                                  [--claude-review-effort low|medium|high|xhigh|max]
                                  [--copilot-implementer-model NAME]
+                                 [--ledger-path PATH] [--no-ledger] [--artifact-dir PATH]
+                                 [--delivery-mode local|commit|pull-request|merge]
                                  [--config PATH] [--agentmaster-home PATH]
     python install.py uninstall --target claude|copilot|all [--dry-run]
     python install.py validate
@@ -37,6 +39,7 @@ from installer.config import (
     ClaudeRoleConfig,
     ConfigError,
     CopilotRoleConfig,
+    DeliveryMode,
     Effort,
     ResolvedConfig,
     Role,
@@ -46,12 +49,20 @@ from installer.config import (
     load_config_document,
     resolve,
     resolve_role,
+    validate_ledger_flags,
     validate_role_flags,
+)
+from installer.ledger_bootstrap import (
+    LedgerBootstrapError,
+    LedgerBootstrapPlan,
+    bootstrap,
 )
 from installer.parity import validate
 from installer.render import sync_workers
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from installer.actions import InstallReport
 
 ROOT = Path(__file__).resolve().parent
@@ -131,6 +142,16 @@ def _unresolved_config(args: argparse.Namespace) -> UnresolvedConfig:
         claude_review_model=getattr(args, 'claude_review_model', None),
         claude_review_effort=_effort('claude_review_effort'),
         copilot_implementer_model=getattr(args, 'copilot_implementer_model', None),
+        ledger_path=Path(args.ledger_path)
+        if getattr(args, 'ledger_path', None)
+        else None,
+        no_ledger=getattr(args, 'no_ledger', False),
+        artifact_dir=Path(args.artifact_dir)
+        if getattr(args, 'artifact_dir', None)
+        else None,
+        delivery_mode=DeliveryMode(args.delivery_mode)
+        if getattr(args, 'delivery_mode', None)
+        else None,
     )
 
 
@@ -208,6 +229,23 @@ def _resolve_copilot_roles(
     )
 
 
+def _bootstrap_ledger(resolved: ResolvedConfig) -> int | None:
+    """Run the ledger/artifact bootstrap; returns an exit code only on failure."""
+    if not resolved.ledger_enabled:
+        return None
+    try:
+        bootstrap(
+            LedgerBootstrapPlan(
+                ledger_path=resolved.ledger_path, artifact_path=resolved.artifact_path
+            ),
+            dry_run=resolved.dry_run,
+        )
+    except LedgerBootstrapError as error:
+        print(f'ledger: {error}', file=sys.stderr)
+        return 1
+    return None
+
+
 def _cmd_install(args: argparse.Namespace) -> int:
     unresolved = _unresolved_config(args)
     bad_model = _invalid_model(unresolved)
@@ -225,6 +263,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
     try:
         validate_role_flags(unresolved)
+        validate_ledger_flags(unresolved)
         resolved = resolve(unresolved, document)
     except ConfigError as error:
         print(f'invalid config: {error}', file=sys.stderr)
@@ -232,6 +271,10 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
     for line in resolved.summary_lines():
         print(f'  {line}')
+
+    ledger_error = _bootstrap_ledger(resolved)
+    if ledger_error is not None:
+        return ledger_error
 
     is_tty = sys.stdin.isatty()
     for target in resolved.targets:
@@ -244,6 +287,9 @@ def _cmd_install(args: argparse.Namespace) -> int:
                     home,
                     roles=roles,
                     agentmaster_home=resolved.agentmaster_home,
+                    ledger_path=resolved.ledger_path,
+                    artifact_path=resolved.artifact_path,
+                    ledger_enabled=resolved.ledger_enabled,
                     delivery_mode=resolved.delivery_mode,
                     raw_capture=resolved.raw_capture,
                     redaction=resolved.redaction,
@@ -299,10 +345,36 @@ def _cmd_sync(_args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    raw_argv = sys.argv[1:] if argv is None else argv
-    if _reject_removed_model_flag(raw_argv):
-        return 1
+def _add_target_arguments(cmd: argparse.ArgumentParser) -> None:
+    cmd.add_argument('--target', choices=('claude', 'copilot', 'all'), default='all')
+    cmd.add_argument('--dry-run', action='store_true')
+    cmd.add_argument('--claude-dir', default=None)
+    cmd.add_argument('--copilot-dir', default=None)
+
+
+def _add_role_arguments(cmd: argparse.ArgumentParser) -> None:
+    effort_choices = [effort.value for effort in Effort]
+    cmd.add_argument('--claude-model', default=None)
+    cmd.add_argument('--copilot-model', default=None)
+    cmd.add_argument('--claude-orchestrator-model', default=None)
+    cmd.add_argument('--claude-orchestrator-effort', choices=effort_choices, default=None)
+    cmd.add_argument('--claude-implementer-model', default=None)
+    cmd.add_argument('--claude-implementer-effort', choices=effort_choices, default=None)
+    cmd.add_argument('--claude-review-model', default=None)
+    cmd.add_argument('--claude-review-effort', choices=effort_choices, default=None)
+    cmd.add_argument('--copilot-implementer-model', default=None)
+
+
+def _add_ledger_arguments(cmd: argparse.ArgumentParser) -> None:
+    cmd.add_argument('--ledger-path', default=None)
+    cmd.add_argument('--no-ledger', action='store_true')
+    cmd.add_argument('--artifact-dir', default=None)
+    cmd.add_argument(
+        '--delivery-mode', choices=[mode.value for mode in DeliveryMode], default=None
+    )
+
+
+def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, Callable]]:
     parser = argparse.ArgumentParser(prog='install.py', description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     commands = {
@@ -314,32 +386,21 @@ def main(argv: list[str] | None = None) -> int:
     for name in commands:
         cmd = sub.add_parser(name)
         if name in ('install', 'uninstall'):
-            cmd.add_argument(
-                '--target', choices=('claude', 'copilot', 'all'), default='all'
-            )
-            cmd.add_argument('--dry-run', action='store_true')
-            cmd.add_argument('--claude-dir', default=None)
-            cmd.add_argument('--copilot-dir', default=None)
+            _add_target_arguments(cmd)
         if name == 'install':
-            effort_choices = [effort.value for effort in Effort]
-            cmd.add_argument('--claude-model', default=None)
-            cmd.add_argument('--copilot-model', default=None)
-            cmd.add_argument('--claude-orchestrator-model', default=None)
-            cmd.add_argument(
-                '--claude-orchestrator-effort', choices=effort_choices, default=None
-            )
-            cmd.add_argument('--claude-implementer-model', default=None)
-            cmd.add_argument(
-                '--claude-implementer-effort', choices=effort_choices, default=None
-            )
-            cmd.add_argument('--claude-review-model', default=None)
-            cmd.add_argument(
-                '--claude-review-effort', choices=effort_choices, default=None
-            )
-            cmd.add_argument('--copilot-implementer-model', default=None)
+            _add_role_arguments(cmd)
+            _add_ledger_arguments(cmd)
             cmd.add_argument('--config', default=None)
             cmd.add_argument('--agentmaster-home', default=None)
             cmd.add_argument('--no-input', action='store_true')
+    return parser, commands
+
+
+def main(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else argv
+    if _reject_removed_model_flag(raw_argv):
+        return 1
+    parser, commands = _build_parser()
     args = parser.parse_args(argv)
     return commands[args.command](args)
 
