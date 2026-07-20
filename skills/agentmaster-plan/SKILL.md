@@ -24,7 +24,8 @@ Model check: state in your first message which model you are running on. If
 it is not the frontier model pinned in this skill's frontmatter, tell the
 user to run `/model <pin>` (or to confirm the current model is acceptable)
 before anything is dispatched — skill-level pins are best-effort on current
-CLI versions.
+CLI versions. Log any mismatch as a ledger entry so it's visible to review,
+not just to the user in this turn.
 
 Task to plan: $ARGUMENTS
 
@@ -70,6 +71,11 @@ Phase marker: before anything else, write the single word `plan` to
 cost-boundary hook exempts `.agentmaster/`. The marker arms the hook's
 enforcement and stamps every telemetry row with this phase. If the write is
 blocked (plan mode forbids workspace writes), continue without it.
+
+Plan mode note: if a subagent's read or write is blocked by the user-level
+secrets-guard hook (a false positive outside this repo's scope), recommend
+the user add the path to that hook's allowlist rather than routing around
+it — this is documentation, not a fix owned by this skill.
 
 ## Phase 1 — Frame
 
@@ -123,6 +129,12 @@ Dispatch rules:
   re-dispatch with a sharper question, never a look for yourself. A report
   arriving over the cap is not read past its contract sections — re-dispatch
   narrower.
+- Addressing convention: every mid-run correction names its target agent and
+  restates the task id — never "reply to both" when more than one agent is
+  running concurrently. An unaddressed correction is a message no agent will
+  reliably claim.
+- Waiting narration: while background agents run, a progress update names
+  which agents are still outstanding, not only which have finished.
 
 Report contract (paste into every dispatch):
 
@@ -256,6 +268,10 @@ resources sections,
 the execution contract, the closing review gate,
 and the Open Questions section. If writing-plans
 is unavailable, write the plan document yourself with that structure.
+
+Post-formalize lint: run `scripts/plan-structure-lint.sh <plan-file>` against
+the produced plan and reshape until it exits 0. A plan that fails the lint is
+not formalized yet.
 
 ## Output
 
