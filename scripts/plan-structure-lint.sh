@@ -47,13 +47,16 @@ check_pattern 'Open Questions section' '^#+[[:space:]]*Open Questions'
 check_pattern 'review gate (agentmaster-review)' 'review gate|agentmaster-review'
 
 # Citation rule (E12(b)/E18): task text must cite ledger entry numbers, not
-# a raw evidence/*.md path. Exempt the Evidence ledger section, which
-# legitimately names evidence files in prose — reset on every heading line.
+# a raw evidence/*.md path. Exempt only the real Evidence ledger section — a
+# heading whose text (after the leading #'s) STARTS WITH "evidence ledger",
+# not any heading that merely contains the phrase — reset on every heading.
 BODY="$(awk '
     {
         line = $0
         if (line ~ /^#+[[:space:]]/) {
-            in_ledger = (tolower(line) ~ /evidence[[:space:]]+ledger/) ? 1 : 0
+            heading = line
+            sub(/^#+[[:space:]]*/, "", heading)
+            in_ledger = (tolower(heading) ~ /^evidence[[:space:]]+ledger/) ? 1 : 0
         }
         if (!in_ledger) print line
     }
