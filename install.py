@@ -239,7 +239,16 @@ def _cmd_install(args: argparse.Namespace) -> int:
         try:
             if target is Target.CLAUDE:
                 roles = _resolve_claude_roles(unresolved, is_tty=is_tty)
-                report = claude.install(ROOT, home, roles=roles, dry_run=resolved.dry_run)
+                report = claude.install(
+                    ROOT,
+                    home,
+                    roles=roles,
+                    agentmaster_home=resolved.agentmaster_home,
+                    delivery_mode=resolved.delivery_mode,
+                    raw_capture=resolved.raw_capture,
+                    redaction=resolved.redaction,
+                    dry_run=resolved.dry_run,
+                )
             else:
                 roles = _resolve_copilot_roles(unresolved, is_tty=is_tty)
                 report = copilot.install(
@@ -256,9 +265,16 @@ def _cmd_install(args: argparse.Namespace) -> int:
 def _cmd_uninstall(args: argparse.Namespace) -> int:
     resolved = resolve(_unresolved_config(args))
     for target in resolved.targets:
-        module = claude if target is Target.CLAUDE else copilot
+        home = _home(target, resolved)
         try:
-            report = module.uninstall(_home(target, resolved), dry_run=resolved.dry_run)
+            if target is Target.CLAUDE:
+                report = claude.uninstall(
+                    home,
+                    agentmaster_home=resolved.agentmaster_home,
+                    dry_run=resolved.dry_run,
+                )
+            else:
+                report = copilot.uninstall(home, dry_run=resolved.dry_run)
         except OSError as error:
             print(f'{target}: uninstall failed: {error}', file=sys.stderr)
             return 1
