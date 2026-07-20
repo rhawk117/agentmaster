@@ -40,7 +40,7 @@ def _consume_start(am: Path, aid: str) -> str:
     st = am / '.starts' / aid
     try:
         duration = str(int((time.time() - float(st.read_text())) * 1000))
-    except Exception:
+    except OSError, ValueError:
         return ''
     with contextlib.suppress(Exception):
         st.unlink()

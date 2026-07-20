@@ -48,6 +48,12 @@ select = [
     "ANN206",
     "FBT001",
     "FBT002",
+    "BLE",
+    "ARG",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
 ]
 
 ignore = [
@@ -69,8 +75,12 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
-# tests exercise private helpers and pytest test functions don't annotate returns
-"tests/**" = ["SLF001", "ANN"]
+# tests exercise private helpers, pytest test functions don't annotate returns,
+# and test factory helpers take many independent override knobs by design
+"tests/**" = ["SLF001", "ANN", "PLR0913"]
+
+[lint.mccabe]
+max-complexity = 10
 
 [lint.flake8-quotes]
 docstring-quotes = "single"

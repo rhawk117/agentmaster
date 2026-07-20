@@ -6,16 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from installer.claude import default_home
+from installer.claude import ClaudeInstallOptions, default_home
 from installer.claude import install as _claude_install
 from installer.claude import uninstall as _claude_uninstall
 from installer.config import (
+    AutoCompactOverride,
     ClaudeRoleConfig,
     DeliveryMode,
     Effort,
     RawCapture,
     RedactionMode,
+    ResolvedConfig,
     RoleOverride,
+    Target,
 )
 from installer.render import render_worker
 
@@ -38,6 +41,23 @@ def _roles(
     )
 
 
+def _resolved_config(home, agentmaster_home, *, dry_run) -> ResolvedConfig:
+    return ResolvedConfig(
+        targets=(Target.CLAUDE,),
+        dry_run=dry_run,
+        no_input=True,
+        claude_dir=home,
+        copilot_dir=None,
+        agentmaster_home=agentmaster_home,
+        ledger_path=agentmaster_home / 'ledger.sqlite3',
+        artifact_path=agentmaster_home / 'artifacts',
+        ledger_enabled=True,
+        delivery_mode=DeliveryMode.LOCAL,
+        raw_capture=RawCapture.FAILURES,
+        redaction=RedactionMode.STANDARD,
+    )
+
+
 def install(
     root,
     home,
@@ -51,22 +71,15 @@ def install(
 ):
     kwargs = {} if manifest is None else {'manifest': manifest}
     resolved_agentmaster_home = agentmaster_home or (home.parent / 'agentmaster-home')
-    return _claude_install(
-        root,
-        home,
+    options = ClaudeInstallOptions(
         roles=roles or _roles(),
-        agentmaster_home=resolved_agentmaster_home,
-        ledger_path=resolved_agentmaster_home / 'ledger.sqlite3',
-        artifact_path=resolved_agentmaster_home / 'artifacts',
-        ledger_enabled=True,
-        delivery_mode=DeliveryMode.LOCAL,
-        raw_capture=RawCapture.FAILURES,
-        redaction=RedactionMode.STANDARD,
-        auto_compact_percent=auto_compact_percent,
-        clear_auto_compact_override=clear_auto_compact_override,
-        dry_run=dry_run,
+        resolved=_resolved_config(home, resolved_agentmaster_home, dry_run=dry_run),
+        auto_compact=AutoCompactOverride(
+            auto_compact_percent, clear_auto_compact_override
+        ),
         **kwargs,
     )
+    return _claude_install(root, home, options)
 
 
 def uninstall(home, *, dry_run=False, agentmaster_home=None):
@@ -364,7 +377,7 @@ def test_install_writes_agentmaster_config_and_owned_state(
 
 
 def test_managed_files_participate_in_dry_run_reporting(
-    tmp_path: Path, repo_root, statuses
+    tmp_path: Path, repo_root
 ) -> None:
     home = tmp_path / 'claude-home'
     agentmaster_home = tmp_path / 'agentmaster-home'

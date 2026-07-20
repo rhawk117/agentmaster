@@ -13,7 +13,7 @@ import tomllib
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -385,6 +385,13 @@ def validate_auto_compact_flags(unresolved: UnresolvedConfig) -> None:
         )
 
 
+class AutoCompactOverride(NamedTuple):
+    """Resolved Claude auto-compact percent/clear intent for one install."""
+
+    percent: int | None
+    clear: bool
+
+
 def resolve_auto_compact(
     *,
     explicit_percent: int | None,
@@ -392,18 +399,34 @@ def resolve_auto_compact(
     no_input: bool,
     is_tty: bool,
     prompt: Callable[[], tuple[int | None, bool]] | None = None,
-) -> tuple[int | None, bool]:
+) -> AutoCompactOverride:
     """Resolve the Claude auto-compact percent/clear intent for one install.
 
-    Returns `(percent, clear)`. An explicit flag always wins; otherwise an
-    interactive prompt runs when available; otherwise noninteractive install
-    preserves current behavior (`None, False`) per SPEC.md §15.
+    An explicit flag always wins; otherwise an interactive prompt runs when
+    available; otherwise noninteractive install preserves current behavior
+    (`None, False`) per SPEC.md §15.
     """
     if explicit_percent is not None or explicit_clear:
-        return explicit_percent, explicit_clear
+        return AutoCompactOverride(explicit_percent, explicit_clear)
     if is_tty and not no_input and prompt is not None:
-        return prompt()
-    return None, False
+        return AutoCompactOverride(*prompt())
+    return AutoCompactOverride(None, False)
+
+
+class RolePromptContext(NamedTuple):
+    """Prompting collaborators shared by every `resolve_role()` call in one install.
+
+    `is_tty` and `prompt` are explicit collaborators (not `sys.stdin.isatty()`
+    or `input()` called internally) so tests drive both branches without a
+    real terminal. `no_input` and a non-interactive `is_tty=False` both
+    suppress prompting.
+    """
+
+    no_input: bool
+    is_tty: bool
+    prompt: (
+        Callable[[Role, Target, str, Effort | None], tuple[str, Effort | None]] | None
+    ) = None
 
 
 def resolve_role(
@@ -412,18 +435,10 @@ def resolve_role(
     *,
     explicit_model: str | None,
     explicit_effort: Effort | None,
-    no_input: bool,
-    is_tty: bool,
-    prompt: Callable[[Role, Target, str, Effort | None], tuple[str, Effort | None]]
-    | None = None,
+    context: RolePromptContext,
 ) -> RoleOverride:
     """Resolve one role's model (and effort, where supported): explicit flag,
     else prompt, else the recommended default (SPEC.md §11.1).
-
-    `is_tty` and `prompt` are explicit collaborators (not `sys.stdin.isatty()`
-    or `input()` called internally) so tests drive both branches without a
-    real terminal. `no_input` and a non-interactive `is_tty=False` both
-    suppress prompting.
     """
     default_model = DEFAULT_ROLE_MODEL[(target, role)]
     default_effort = DEFAULT_ROLE_EFFORT.get(role)
@@ -431,7 +446,7 @@ def resolve_role(
         model = explicit_model or default_model
         effort = explicit_effort or default_effort
         return RoleOverride(model=model, effort=effort)
-    if is_tty and not no_input and prompt is not None:
-        model, effort = prompt(role, target, default_model, default_effort)
+    if context.is_tty and not context.no_input and context.prompt is not None:
+        model, effort = context.prompt(role, target, default_model, default_effort)
         return RoleOverride(model=model, effort=effort)
     return RoleOverride(model=default_model, effort=default_effort)

@@ -41,7 +41,7 @@ def current_phase(am: Path) -> str:
     """Return the active phase named in .phase, or '' when absent/unreadable."""
     try:
         return (am / '.phase').read_text().strip().split()[0]
-    except Exception:
+    except OSError, IndexError, ValueError:
         return ''
 
 
