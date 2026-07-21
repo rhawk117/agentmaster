@@ -145,20 +145,44 @@ def _quality_observations(
     ]
 
 
+_FEEDBACK_SENTIMENTS: dict[int, str] = {-1: 'unhelpful', 0: 'neutral', 1: 'helpful'}
+
+
+def _feedback_observations(
+    read_connection: sqlite3.Connection, run_id: str
+) -> list[ObservationDraft]:
+    rows = read_connection.execute(
+        'SELECT rating, comment FROM v_run_feedback WHERE run_id = ? ORDER BY created_at',
+        (run_id,),
+    ).fetchall()
+    return [
+        ObservationDraft(
+            observation_kind='feedback',
+            claim=(
+                f'user feedback: {_FEEDBACK_SENTIMENTS[rating]}'
+                + (f' -- {comment}' if comment else '')
+            ),
+            confidence='descriptive',
+        )
+        for rating, comment in rows
+    ]
+
+
 def gather_observations(
     read_connection: sqlite3.Connection, run_id: str
 ) -> list[ObservationDraft]:
     """Build descriptive observations for `run_id` from allow-listed views only.
 
-    Reads `v_run_summary` (outcome), `v_token_usage_by_role` (efficiency), and
-    `v_delivery_current_head`/`v_unresolved_review_findings` (quality) --
-    never a raw table -- matching SPEC.md §18: "connects read-only to
-    allow-listed views."
+    Reads `v_run_summary` (outcome), `v_token_usage_by_role` (efficiency),
+    `v_delivery_current_head`/`v_unresolved_review_findings` (quality), and
+    `v_run_feedback` (feedback) -- never a raw table -- matching SPEC.md §18:
+    "connects read-only to allow-listed views."
     """
     return [
         *_outcome_observations(read_connection, run_id),
         *_efficiency_observations(read_connection, run_id),
         *_quality_observations(read_connection, run_id),
+        *_feedback_observations(read_connection, run_id),
     ]
 
 

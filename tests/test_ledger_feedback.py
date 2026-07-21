@@ -77,3 +77,105 @@ def test_record_feedback_rejects_an_unknown_memory_id(connection):
 
     with pytest.raises(UnknownReferenceError, match='MEMORY'):
         record_feedback(connection, feedback)
+
+
+def _seed_memory(connection, *, memory_id: str = 'memory-1') -> None:
+    connection.execute(
+        'INSERT INTO MEMORY '
+        '(id, origin_project_id, state, memory_kind, title, content, created_at, '
+        'updated_at) '
+        "VALUES (?, 'project-1', 'Active', 'lesson', 'title', 'content', ?, ?)",
+        (memory_id, _CREATED_AT, _CREATED_AT),
+    )
+    connection.commit()
+
+
+def _seed_memory_access(
+    connection,
+    *,
+    access_id: str = 'access-1',
+    run_id: str = 'run-1',
+    memory_id: str = 'memory-1',
+) -> None:
+    connection.execute(
+        'INSERT INTO memory_access '
+        '(id, run_id, memory_id, query_digest, rank, score, '
+        'retrieval_algorithm_version, created_at) '
+        "VALUES (?, ?, ?, 'digest', 0, 1.0, 'v1', ?)",
+        (access_id, run_id, memory_id, _CREATED_AT),
+    )
+    connection.commit()
+
+
+@pytest.mark.sqlite
+def test_record_feedback_marks_a_used_memory_helpful_and_bumps_usefulness_count(
+    connection,
+):
+    _seed_memory(connection)
+    _seed_memory_access(connection)
+    feedback = FeedbackInput(
+        id='feedback-1',
+        user_session_id='user-session-1',
+        run_id='run-1',
+        rating=1,
+        created_at=_CREATED_AT,
+        memory_id='memory-1',
+    )
+
+    record_feedback(connection, feedback)
+
+    helpful, harmful = connection.execute(
+        "SELECT helpful, harmful FROM memory_access WHERE id = 'access-1'"
+    ).fetchone()
+    assert (helpful, harmful) == (1, 0)
+    usefulness_count, harmful_count = connection.execute(
+        "SELECT usefulness_count, harmful_count FROM MEMORY WHERE id = 'memory-1'"
+    ).fetchone()
+    assert (usefulness_count, harmful_count) == (1, 0)
+
+
+@pytest.mark.sqlite
+def test_record_feedback_marks_a_used_memory_harmful_and_bumps_harmful_count(connection):
+    _seed_memory(connection)
+    _seed_memory_access(connection)
+    feedback = FeedbackInput(
+        id='feedback-1',
+        user_session_id='user-session-1',
+        run_id='run-1',
+        rating=-1,
+        created_at=_CREATED_AT,
+        memory_id='memory-1',
+    )
+
+    record_feedback(connection, feedback)
+
+    helpful, harmful = connection.execute(
+        "SELECT helpful, harmful FROM memory_access WHERE id = 'access-1'"
+    ).fetchone()
+    assert (helpful, harmful) == (0, 1)
+    usefulness_count, harmful_count = connection.execute(
+        "SELECT usefulness_count, harmful_count FROM MEMORY WHERE id = 'memory-1'"
+    ).fetchone()
+    assert (usefulness_count, harmful_count) == (0, 1)
+
+
+@pytest.mark.sqlite
+def test_record_feedback_leaves_counts_untouched_for_a_memory_never_used_in_the_run(
+    connection,
+):
+    _seed_memory(connection)
+    feedback = FeedbackInput(
+        id='feedback-1',
+        user_session_id='user-session-1',
+        run_id='run-1',
+        rating=1,
+        created_at=_CREATED_AT,
+        memory_id='memory-1',
+    )
+
+    record_feedback(connection, feedback)
+
+    usefulness_count, harmful_count = connection.execute(
+        "SELECT usefulness_count, harmful_count FROM MEMORY WHERE id = 'memory-1'"
+    ).fetchone()
+    assert (usefulness_count, harmful_count) == (0, 0)
