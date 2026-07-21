@@ -672,6 +672,338 @@ def _add_memory_retrieval_schema(connection: sqlite3.Connection) -> None:
     _create_memory_access(connection)
 
 
+_PROCEDURE_VERSION_STATUSES = ('inactive', 'active')  # SPEC.md §20.4
+
+
+def _create_retrospective(connection: sqlite3.Connection) -> None:
+    """RETROSPECTIVE: the single retrospective a run concludes with (§17.2, §9.1).
+
+    `run_id` is UNIQUE: the ERD's "RUN ||--o| RETROSPECTIVE" cardinality means
+    a run has at most one retrospective. `status` reuses the two literal
+    states named in the run state machine (§9.1: RetrospectivePending,
+    Complete), dropping the run-specific prefix since this column already
+    belongs to the RETROSPECTIVE table.
+    """
+    status_check = "CHECK (status IN ('Pending', 'Complete'))"
+    connection.execute(
+        'CREATE TABLE RETROSPECTIVE ('
+        'id TEXT PRIMARY KEY, '
+        'run_id TEXT NOT NULL UNIQUE REFERENCES RUN(id), '
+        f'status TEXT NOT NULL {status_check}, '
+        'outcome TEXT, '
+        'summary TEXT, '
+        'created_at TEXT NOT NULL, '
+        'completed_at TEXT'
+        ')'
+    )
+    connection.execute('CREATE INDEX idx_retrospective_run_id ON RETROSPECTIVE(run_id)')
+
+
+def _create_retro_observation(connection: sqlite3.Connection) -> None:
+    """RETRO_OBSERVATION: one claim recorded during a retrospective (§17.2)."""
+    connection.execute(
+        'CREATE TABLE RETRO_OBSERVATION ('
+        'id TEXT PRIMARY KEY, '
+        'retrospective_id TEXT NOT NULL REFERENCES RETROSPECTIVE(id), '
+        'observation_kind TEXT NOT NULL, '
+        'claim TEXT NOT NULL, '
+        'confidence TEXT, '
+        'counterfactual TEXT, '
+        'created_at TEXT NOT NULL'
+        ')'
+    )
+    connection.execute(
+        'CREATE INDEX idx_retro_observation_retrospective_id '
+        'ON RETRO_OBSERVATION(retrospective_id)'
+    )
+
+
+def _create_procedure(connection: sqlite3.Connection) -> None:
+    """PROCEDURE: a named, project-owned procedure with an independent version history."""
+    connection.execute(
+        'CREATE TABLE PROCEDURE ('
+        'id TEXT PRIMARY KEY, '
+        'project_id TEXT NOT NULL REFERENCES PROJECT(id), '
+        'name TEXT NOT NULL, '
+        'scope TEXT NOT NULL, '
+        'state TEXT NOT NULL, '
+        'created_at TEXT NOT NULL'
+        ')'
+    )
+    connection.execute('CREATE INDEX idx_procedure_project_id ON PROCEDURE(project_id)')
+
+
+def _create_procedure_version(connection: sqlite3.Connection) -> None:
+    """PROCEDURE_VERSION: one immutable, numbered version of a procedure (§20.4).
+
+    `status` is `inactive` or `active`: "a new procedure proposal creates a
+    new inactive PROCEDURE_VERSION; it never edits the active skill in
+    place" (§20.4). `UNIQUE(procedure_id, version_no)` keeps that numbered
+    history unambiguous.
+    """
+    status_check = f'CHECK (status IN ({_in_clause(_PROCEDURE_VERSION_STATUSES)}))'
+    connection.execute(
+        'CREATE TABLE PROCEDURE_VERSION ('
+        'id TEXT PRIMARY KEY, '
+        'procedure_id TEXT NOT NULL REFERENCES PROCEDURE(id), '
+        'version_no INTEGER NOT NULL CHECK (version_no >= 1), '
+        'content_hash TEXT NOT NULL, '
+        'artifact_id TEXT REFERENCES ARTIFACT(id), '
+        f'status TEXT NOT NULL {status_check}, '
+        'created_at TEXT NOT NULL, '
+        'UNIQUE (procedure_id, version_no)'
+        ')'
+    )
+    connection.execute(
+        'CREATE INDEX idx_procedure_version_procedure_id '
+        'ON PROCEDURE_VERSION(procedure_id)'
+    )
+    connection.execute(
+        'CREATE INDEX idx_procedure_version_artifact_id ON PROCEDURE_VERSION(artifact_id)'
+    )
+
+
+def _create_procedure_use(connection: sqlite3.Connection) -> None:
+    """PROCEDURE_USE: one task's application of a procedure version (§17.2)."""
+    connection.execute(
+        'CREATE TABLE PROCEDURE_USE ('
+        'id TEXT PRIMARY KEY, '
+        'procedure_version_id TEXT NOT NULL REFERENCES PROCEDURE_VERSION(id), '
+        'task_id TEXT REFERENCES TASK(id), '
+        'agent_session_id TEXT REFERENCES AGENT_SESSION(id), '
+        'outcome TEXT, '
+        'created_at TEXT NOT NULL'
+        ')'
+    )
+    connection.execute(
+        'CREATE INDEX idx_procedure_use_procedure_version_id '
+        'ON PROCEDURE_USE(procedure_version_id)'
+    )
+    connection.execute('CREATE INDEX idx_procedure_use_task_id ON PROCEDURE_USE(task_id)')
+    connection.execute(
+        'CREATE INDEX idx_procedure_use_agent_session_id '
+        'ON PROCEDURE_USE(agent_session_id)'
+    )
+
+
+def _create_evaluation(connection: sqlite3.Connection) -> None:
+    """EVALUATION: one worth judgment about a memory or a procedure version (§17.2, §18).
+
+    `evaluator_session_id` references AGENT_SESSION, matching the codebase's
+    existing split between USER_SESSION (the human/harness session that
+    gives FEEDBACK) and AGENT_SESSION (a dispatched session that performs
+    structured analysis, the same role REVIEW.reviewer_session_id plays for
+    code review, §17.1). The trailing CHECK requires every evaluation to
+    evaluate something, matching the ERD's two "evaluates" relationships.
+    """
+    connection.execute(
+        'CREATE TABLE EVALUATION ('
+        'id TEXT PRIMARY KEY, '
+        'memory_id TEXT REFERENCES MEMORY(id), '
+        'procedure_version_id TEXT REFERENCES PROCEDURE_VERSION(id), '
+        'project_id TEXT NOT NULL REFERENCES PROJECT(id), '
+        'evaluator_session_id TEXT REFERENCES AGENT_SESSION(id), '
+        'evaluation_kind TEXT NOT NULL, '
+        'decision TEXT NOT NULL, '
+        'created_at TEXT NOT NULL, '
+        'CHECK (memory_id IS NOT NULL OR procedure_version_id IS NOT NULL)'
+        ')'
+    )
+    connection.execute('CREATE INDEX idx_evaluation_memory_id ON EVALUATION(memory_id)')
+    connection.execute(
+        'CREATE INDEX idx_evaluation_procedure_version_id '
+        'ON EVALUATION(procedure_version_id)'
+    )
+    connection.execute('CREATE INDEX idx_evaluation_project_id ON EVALUATION(project_id)')
+    connection.execute(
+        'CREATE INDEX idx_evaluation_evaluator_session_id '
+        'ON EVALUATION(evaluator_session_id)'
+    )
+
+
+def _create_evaluation_metric(connection: sqlite3.Connection) -> None:
+    """EVALUATION_METRIC: one named, unit-carrying measure backing an evaluation (§18).
+
+    Has no declared primary key, matching MEMORY_SCOPE/MEMORY_TARGET/
+    MEMORY_LINK/MEMORY_EVIDENCE: a plain attribute table keyed by its parent.
+    """
+    connection.execute(
+        'CREATE TABLE EVALUATION_METRIC ('
+        'evaluation_id TEXT NOT NULL REFERENCES EVALUATION(id), '
+        'metric_name TEXT NOT NULL, '
+        'value_microunits INTEGER NOT NULL, '
+        'unit TEXT NOT NULL, '
+        'method TEXT NOT NULL'
+        ')'
+    )
+    connection.execute(
+        'CREATE INDEX idx_evaluation_metric_evaluation_id '
+        'ON EVALUATION_METRIC(evaluation_id)'
+    )
+
+
+def _rebuild_memory_evidence_with_observation_fk(connection: sqlite3.Connection) -> None:
+    """Rebuild MEMORY_EVIDENCE so `observation_id` gains a real FK to RETRO_OBSERVATION.
+
+    Microtask 14 could not declare this FK because RETRO_OBSERVATION did not
+    exist yet (same reasoning as COMPACTION_EVENT.snapshot_artifact_id in
+    Microtask 12/13). MEMORY_EVIDENCE is only ever a foreign-key *child*
+    (nothing else references it), so this table-rebuild is safe with
+    `PRAGMA foreign_keys = ON` held throughout, following the same pattern
+    as `_rebuild_compaction_event_with_artifact_fk`.
+    """
+    connection.execute(
+        'CREATE TABLE MEMORY_EVIDENCE_NEW ('
+        'memory_id TEXT NOT NULL REFERENCES MEMORY(id), '
+        'evidence_id TEXT NOT NULL REFERENCES EVIDENCE(id), '
+        'observation_id TEXT REFERENCES RETRO_OBSERVATION(id), '
+        'relation TEXT NOT NULL, '
+        'strength TEXT, '
+        'created_at TEXT NOT NULL'
+        ')'
+    )
+    connection.execute(
+        'INSERT INTO MEMORY_EVIDENCE_NEW '
+        '(memory_id, evidence_id, observation_id, relation, strength, created_at) '
+        'SELECT memory_id, evidence_id, observation_id, relation, strength, created_at '
+        'FROM MEMORY_EVIDENCE'
+    )
+    connection.execute('DROP TABLE MEMORY_EVIDENCE')
+    connection.execute('ALTER TABLE MEMORY_EVIDENCE_NEW RENAME TO MEMORY_EVIDENCE')
+    connection.execute(
+        'CREATE INDEX idx_memory_evidence_memory_id ON MEMORY_EVIDENCE(memory_id)'
+    )
+    connection.execute(
+        'CREATE INDEX idx_memory_evidence_evidence_id ON MEMORY_EVIDENCE(evidence_id)'
+    )
+    connection.execute(
+        'CREATE INDEX idx_memory_evidence_observation_id '
+        'ON MEMORY_EVIDENCE(observation_id)'
+    )
+
+
+def _create_readonly_views(connection: sqlite3.Connection) -> None:
+    """Create the stable, read-only views SPEC.md §18 names for retrospective code.
+
+    SQLite rejects writes against a view with no `INSTEAD OF` trigger (none
+    are defined here), which is what makes these safe to expose on a
+    query-only connection. `v_delivery_current_head` and
+    `v_unresolved_review_findings` reference DELIVERY_ATTEMPT, CI_CHECK,
+    REVIEW, and REVIEW_FINDING, which do not exist until Microtask 22 adds
+    them (§17.1); SQLite does not validate a view's table references until
+    it is queried, so `CREATE VIEW` succeeds now and those two views only
+    become queryable once Microtask 22 lands, matching the same forward-
+    reference reasoning as the deferred FKs above.
+    """
+    connection.execute(
+        'CREATE VIEW v_run_summary AS '
+        'SELECT r.id AS run_id, r.project_id, r.user_session_id, r.delivery_mode, '
+        'r.state, r.started_at, r.ended_at, r.duration_ms, '
+        'COUNT(DISTINCT t.id) AS task_count, '
+        "SUM(CASE WHEN t.state = 'complete' THEN 1 ELSE 0 END) AS completed_task_count "
+        'FROM RUN r LEFT JOIN TASK t ON t.run_id = r.id '
+        'GROUP BY r.id'
+    )
+    connection.execute(
+        'CREATE VIEW v_task_acceptance_evidence AS '
+        'SELECT t.id AS task_id, t.run_id, t.title, t.state AS task_state, '
+        't.acceptance_json, e.id AS evidence_id, e.evidence_kind, e.criterion_id, '
+        'e.exit_code, e.commit_sha, e.created_at AS evidence_created_at '
+        'FROM TASK t LEFT JOIN EVIDENCE e ON e.task_id = t.id'
+    )
+    connection.execute(
+        'CREATE VIEW v_token_usage_by_role AS '
+        'SELECT ags.run_id, ags.role, COUNT(mc.id) AS call_count, '
+        'SUM(mc.input_tokens) AS input_tokens, SUM(mc.output_tokens) AS output_tokens, '
+        'SUM(mc.cost_micro_usd) AS cost_micro_usd '
+        'FROM AGENT_SESSION ags JOIN MODEL_CALL mc ON mc.agent_session_id = ags.id '
+        'GROUP BY ags.run_id, ags.role'
+    )
+    connection.execute(
+        'CREATE VIEW v_token_usage_by_model AS '
+        'SELECT ags.run_id, mc.model, COUNT(mc.id) AS call_count, '
+        'SUM(mc.input_tokens) AS input_tokens, SUM(mc.output_tokens) AS output_tokens, '
+        'SUM(mc.cost_micro_usd) AS cost_micro_usd '
+        'FROM AGENT_SESSION ags JOIN MODEL_CALL mc ON mc.agent_session_id = ags.id '
+        'GROUP BY ags.run_id, mc.model'
+    )
+    connection.execute(
+        'CREATE VIEW v_delivery_current_head AS '
+        'SELECT da.id AS delivery_attempt_id, da.run_id, da.attempt_no, da.branch, '
+        'da.base_sha, da.head_sha, da.pr_number, da.pr_url, da.state AS delivery_state, '
+        'cc.name AS ci_check_name, cc.status AS ci_status, '
+        'cc.conclusion AS ci_conclusion, '
+        'rv.reviewed_sha, rv.verdict AS review_verdict '
+        'FROM DELIVERY_ATTEMPT da '
+        'LEFT JOIN CI_CHECK cc '
+        'ON cc.delivery_attempt_id = da.id AND cc.head_sha = da.head_sha '
+        'LEFT JOIN REVIEW rv '
+        'ON rv.delivery_attempt_id = da.id AND rv.reviewed_sha = da.head_sha'
+    )
+    connection.execute(
+        'CREATE VIEW v_memory_retrieval_outcomes AS '
+        'SELECT ma.id AS memory_access_id, ma.run_id, ma.task_id, ma.agent_session_id, '
+        'ma.memory_id, m.title, m.state AS memory_state, ma.rank, ma.score, ma.selected, '
+        'ma.estimated_tokens, ma.used, ma.helpful, ma.harmful, '
+        'ma.retrieval_algorithm_version, ma.created_at '
+        'FROM memory_access ma JOIN MEMORY m ON m.id = ma.memory_id'
+    )
+    connection.execute(
+        'CREATE VIEW v_procedure_effectiveness AS '
+        'SELECT p.id AS procedure_id, p.project_id, p.name, '
+        'pv.id AS procedure_version_id, '
+        'pv.version_no, pv.status AS procedure_version_status, pu.outcome, '
+        'COUNT(pu.id) AS use_count '
+        'FROM PROCEDURE p '
+        'JOIN PROCEDURE_VERSION pv ON pv.procedure_id = p.id '
+        'LEFT JOIN PROCEDURE_USE pu ON pu.procedure_version_id = pv.id '
+        'GROUP BY p.id, pv.id, pu.outcome'
+    )
+    connection.execute(
+        'CREATE VIEW v_project_active_memories AS '
+        'SELECT m.id AS memory_id, m.origin_project_id, m.memory_kind, m.title, '
+        'm.confidence, m.usefulness_count, m.harmful_count, ms.scope_kind, '
+        'ms.project_id AS scope_project_id '
+        'FROM MEMORY m JOIN MEMORY_SCOPE ms ON ms.memory_id = m.id '
+        "WHERE m.state = 'Active'"
+    )
+    connection.execute(
+        'CREATE VIEW v_unresolved_review_findings AS '
+        'SELECT rf.id AS review_finding_id, rf.review_id, r.delivery_attempt_id, '
+        'r.reviewed_sha, rf.severity, rf.state AS finding_state, rf.criterion_id, '
+        'rf.file_path, rf.line_no, rf.summary, rf.evidence_id '
+        'FROM REVIEW_FINDING rf JOIN REVIEW r ON r.id = rf.review_id '
+        "WHERE rf.state != 'resolved'"
+    )
+    connection.execute(
+        'CREATE VIEW v_retention_candidates AS '
+        'SELECT a.id AS artifact_id, a.project_id, a.retention_class, a.redaction_state, '
+        'a.byte_size, a.created_at, a.expires_at '
+        'FROM ARTIFACT a '
+        'WHERE a.expires_at IS NOT NULL '
+        "AND a.expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+    )
+
+
+def _add_procedure_retro_evaluation_schema(connection: sqlite3.Connection) -> None:
+    """Add procedure/retrospective/evaluation schema and read-only views.
+
+    SPEC.md §23 Microtask 15, §17.2, §18. Also rebuilds MEMORY_EVIDENCE so
+    `observation_id` gains its real FK to RETRO_OBSERVATION, per the same
+    dispatcher-ordered precedent as the Microtask 14 COMPACTION_EVENT
+    rebuild.
+    """
+    _create_retrospective(connection)
+    _create_retro_observation(connection)
+    _create_procedure(connection)
+    _create_procedure_version(connection)
+    _create_procedure_use(connection)
+    _create_evaluation(connection)
+    _create_evaluation_metric(connection)
+    _rebuild_memory_evidence_with_observation_fk(connection)
+    _create_readonly_views(connection)
+
+
 def _add_execution_schema(connection: sqlite3.Connection) -> None:
     """Add the execution/token-accounting tables (SPEC.md §23 Microtask 12, §17.1)."""
     _create_user_session(connection)
@@ -686,7 +1018,7 @@ def _add_execution_schema(connection: sqlite3.Connection) -> None:
     _create_compaction_event(connection)
 
 
-SUPPORTED_SCHEMA_VERSION = 5
+SUPPORTED_SCHEMA_VERSION = 6
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
@@ -711,5 +1043,10 @@ MIGRATIONS: tuple[Migration, ...] = (
         to_version=5,
         description='add memory FTS5 retrieval index and access logging',
         apply=_add_memory_retrieval_schema,
+    ),
+    Migration(
+        to_version=6,
+        description='add procedure/retrospective/evaluation schema and read-only views',
+        apply=_add_procedure_retro_evaluation_schema,
     ),
 )

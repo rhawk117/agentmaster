@@ -1,0 +1,203 @@
+"""Tests for the stable, read-only views SPEC.md §18 names for retrospective code.
+
+`v_delivery_current_head` and `v_unresolved_review_findings` reference
+DELIVERY_ATTEMPT, CI_CHECK, REVIEW, and REVIEW_FINDING, which do not exist
+until Microtask 22 (§17.1); they are asserted to exist as views but are not
+exercised with data here, matching `ledger/schema.py::_create_readonly_views`.
+"""
+
+import sqlite3
+
+import pytest
+
+from ledger.connection import connect
+from ledger.migrations import migrate
+
+_ALL_VIEWS = (
+    'v_run_summary',
+    'v_task_acceptance_evidence',
+    'v_token_usage_by_role',
+    'v_token_usage_by_model',
+    'v_delivery_current_head',
+    'v_memory_retrieval_outcomes',
+    'v_procedure_effectiveness',
+    'v_project_active_memories',
+    'v_unresolved_review_findings',
+    'v_retention_candidates',
+)
+_FORWARD_REFERENCING_VIEWS = ('v_delivery_current_head', 'v_unresolved_review_findings')
+_CREATED_AT = '2026-07-20T00:00:00Z'
+
+
+def _seed_project(
+    connection: sqlite3.Connection, *, project_id: str = 'project-1'
+) -> None:
+    connection.execute(
+        'INSERT INTO PROJECT (id, canonical_root, fingerprint, created_at, last_seen_at) '
+        'VALUES (?, ?, ?, ?, ?)',
+        (project_id, '/repo', f'fp-{project_id}', _CREATED_AT, _CREATED_AT),
+    )
+    connection.commit()
+
+
+def _seed_run(connection: sqlite3.Connection, *, run_id: str = 'run-1') -> None:
+    if (
+        connection.execute("SELECT 1 FROM PROJECT WHERE id = 'project-1'").fetchone()
+        is None
+    ):
+        _seed_project(connection)
+    connection.execute(
+        'INSERT INTO USER_SESSION (user_session_id, harness_session_id, created_at) '
+        'VALUES (?, ?, ?)',
+        ('user-session-1', 'harness-1', _CREATED_AT),
+    )
+    connection.execute(
+        'INSERT INTO RUN '
+        '(id, project_id, user_session_id, delivery_mode, state, started_at) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (run_id, 'project-1', 'user-session-1', 'local', 'Planned', _CREATED_AT),
+    )
+    connection.commit()
+
+
+def _seed_memory(
+    connection: sqlite3.Connection, *, memory_id: str = 'memory-1', state: str = 'Active'
+) -> None:
+    if (
+        connection.execute("SELECT 1 FROM PROJECT WHERE id = 'project-1'").fetchone()
+        is None
+    ):
+        _seed_project(connection)
+    connection.execute(
+        'INSERT INTO MEMORY '
+        '(id, origin_project_id, state, memory_kind, title, content, '
+        'created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (
+            memory_id,
+            'project-1',
+            state,
+            'lesson',
+            'title',
+            'content',
+            _CREATED_AT,
+            _CREATED_AT,
+        ),
+    )
+    connection.commit()
+
+
+@pytest.mark.sqlite
+def test_every_stable_view_is_created(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+
+    views = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'view'"
+        ).fetchall()
+    }
+
+    for view in _ALL_VIEWS:
+        assert view in views
+    connection.close()
+
+
+@pytest.mark.sqlite
+@pytest.mark.parametrize('view', _ALL_VIEWS)
+def test_a_view_rejects_a_direct_insert(tmp_path, view):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+
+    with pytest.raises(sqlite3.OperationalError):
+        connection.execute(f'INSERT INTO {view} DEFAULT VALUES')
+    connection.close()
+
+
+@pytest.mark.sqlite
+@pytest.mark.parametrize('view', _FORWARD_REFERENCING_VIEWS)
+def test_a_forward_referencing_view_is_not_yet_queryable(tmp_path, view):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+
+    with pytest.raises(sqlite3.OperationalError, match='no such table'):
+        connection.execute(f'SELECT * FROM {view}')  # noqa: S608
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_v_run_summary_reflects_a_newly_added_run(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_run(connection)
+
+    row = connection.execute(
+        "SELECT run_id, task_count FROM v_run_summary WHERE run_id = 'run-1'"
+    ).fetchone()
+
+    assert row == ('run-1', 0)
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_v_run_summary_reflects_a_task_added_after_the_run(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_run(connection)
+
+    connection.execute(
+        'INSERT INTO TASK (id, run_id, title, state, sequence_no) VALUES (?, ?, ?, ?, ?)',
+        ('task-1', 'run-1', 'do the thing', 'ready', 1),
+    )
+    connection.commit()
+
+    row = connection.execute(
+        "SELECT task_count FROM v_run_summary WHERE run_id = 'run-1'"
+    ).fetchone()
+
+    assert row == (1,)
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_v_project_active_memories_excludes_a_candidate_memory(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_memory(connection, memory_id='memory-1', state='Candidate')
+    connection.execute(
+        'INSERT INTO MEMORY_SCOPE (memory_id, scope_kind, project_id, created_at) '
+        "VALUES ('memory-1', 'project', 'project-1', ?)",
+        (_CREATED_AT,),
+    )
+    connection.commit()
+
+    rows = connection.execute(
+        'SELECT memory_id FROM v_project_active_memories'
+    ).fetchall()
+
+    assert rows == []
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_v_project_active_memories_reflects_an_activated_memory(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_memory(connection, memory_id='memory-1', state='Candidate')
+    connection.execute(
+        'INSERT INTO MEMORY_SCOPE (memory_id, scope_kind, project_id, created_at) '
+        "VALUES ('memory-1', 'project', 'project-1', ?)",
+        (_CREATED_AT,),
+    )
+    connection.commit()
+
+    connection.execute("UPDATE MEMORY SET state = 'Active' WHERE id = 'memory-1'")
+    connection.commit()
+
+    rows = connection.execute(
+        'SELECT memory_id FROM v_project_active_memories'
+    ).fetchall()
+
+    assert rows == [('memory-1',)]
+    connection.close()
