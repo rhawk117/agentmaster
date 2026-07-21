@@ -1,20 +1,28 @@
-"""Idempotent, path-only ledger bootstrap for the install CLI (SPEC.md §16.1).
+"""Idempotent ledger bootstrap for the install CLI (SPEC.md §16.1).
 
-This task plans only paths and bootstrap intent; the ledger's real schema
-and migrations land in a later task. `bootstrap` only establishes a
-least-privilege directory layout and an empty placeholder database, and
-refuses to touch an existing database whose schema is newer than this
-installer understands rather than risk creating an incompatible one.
+`bootstrap` establishes a least-privilege directory layout and the versioned
+SQLite schema via `ledger.migrations`, and refuses to touch an existing
+database whose schema is newer than this installer understands rather than
+risk creating an incompatible one.
 """
 
 import sqlite3
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ledger.connection import connect as connect_ledger
+from ledger.migrations import migrate
+from ledger.schema import SUPPORTED_SCHEMA_VERSION
+
 if TYPE_CHECKING:
     from pathlib import Path
 
-SUPPORTED_SCHEMA_VERSION = 0
+__all__ = [
+    'SUPPORTED_SCHEMA_VERSION',
+    'LedgerBootstrapError',
+    'LedgerBootstrapPlan',
+    'bootstrap',
+]
 
 
 class LedgerBootstrapError(ValueError):
@@ -38,12 +46,11 @@ def _schema_version(ledger_path: Path) -> int:
         connection.close()
 
 
-def _create_placeholder(ledger_path: Path) -> None:
+def _create_ledger(ledger_path: Path) -> None:
     ledger_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    connection = sqlite3.connect(ledger_path)
+    connection = connect_ledger(ledger_path)
     try:
-        connection.execute(f'PRAGMA user_version = {SUPPORTED_SCHEMA_VERSION}')
-        connection.commit()
+        migrate(connection)
     finally:
         connection.close()
     ledger_path.chmod(0o600)
@@ -74,5 +81,5 @@ def bootstrap(plan: LedgerBootstrapPlan, *, dry_run: bool) -> None:
     if dry_run:
         return
     if not exists:
-        _create_placeholder(plan.ledger_path)
+        _create_ledger(plan.ledger_path)
     plan.artifact_path.mkdir(mode=0o700, parents=True, exist_ok=True)
