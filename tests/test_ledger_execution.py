@@ -54,7 +54,7 @@ def test_fresh_init_reaches_the_execution_schema_version(tmp_path):
 
     final_version = migrate(connection)
 
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 2
+    assert final_version == SUPPORTED_SCHEMA_VERSION
     connection.close()
 
 
@@ -137,7 +137,7 @@ def test_a_v1_database_migrates_forward_with_a_pre_migration_backup(
     connection = connect(ledger_path)
     final_version = migrate(connection, backup_path=backup_path)
 
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 2
+    assert final_version == SUPPORTED_SCHEMA_VERSION
     assert backup_path.exists()
     backup_connection = sqlite3.connect(backup_path)
     try:

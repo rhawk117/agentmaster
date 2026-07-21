@@ -35,6 +35,15 @@ def _create_ledger_health(connection: sqlite3.Connection) -> None:
     )
 
 
+_EVIDENCE_KINDS = (
+    'test-result',
+    'command-result',
+    'diff-inspection',
+    'generated-parity-check',
+    'artifact-hash',
+    'ci-check',
+    'reviewer-finding',
+)  # SPEC.md line 394
 _RUN_STATES = (
     'Planned',
     'Preflight',
@@ -308,6 +317,100 @@ def _create_compaction_event(connection: sqlite3.Connection) -> None:
     )
 
 
+def _create_artifact(connection: sqlite3.Connection) -> None:
+    """ARTIFACT: one content-addressed blob owned by a project (§17.2)."""
+    connection.execute(
+        'CREATE TABLE ARTIFACT ('
+        'id TEXT PRIMARY KEY, '
+        'project_id TEXT NOT NULL REFERENCES PROJECT(id), '
+        'sha256 TEXT NOT NULL, '
+        'media_type TEXT NOT NULL, '
+        'byte_size INTEGER NOT NULL CHECK (byte_size >= 0), '
+        'relative_path TEXT NOT NULL, '
+        'retention_class TEXT NOT NULL, '
+        'redaction_state TEXT NOT NULL, '
+        'created_at TEXT NOT NULL, '
+        'expires_at TEXT'
+        ')'
+    )
+    connection.execute('CREATE INDEX idx_artifact_project_id ON ARTIFACT(project_id)')
+
+
+def _create_evidence(connection: sqlite3.Connection) -> None:
+    """EVIDENCE: one acceptance-evidence record binding an artifact to a task (§17.2)."""
+    evidence_kind_check = f'CHECK (evidence_kind IN ({_in_clause(_EVIDENCE_KINDS)}))'
+    connection.execute(
+        'CREATE TABLE EVIDENCE ('
+        'id TEXT PRIMARY KEY, '
+        'run_id TEXT NOT NULL REFERENCES RUN(id), '
+        'task_id TEXT REFERENCES TASK(id), '
+        'artifact_id TEXT NOT NULL REFERENCES ARTIFACT(id), '
+        f'evidence_kind TEXT NOT NULL {evidence_kind_check}, '
+        'criterion_id TEXT, '
+        'command TEXT, '
+        'exit_code INTEGER, '
+        'commit_sha TEXT, '
+        'summary TEXT, '
+        'created_at TEXT NOT NULL'
+        ')'
+    )
+    connection.execute('CREATE INDEX idx_evidence_run_id ON EVIDENCE(run_id)')
+    connection.execute('CREATE INDEX idx_evidence_task_id ON EVIDENCE(task_id)')
+    connection.execute('CREATE INDEX idx_evidence_artifact_id ON EVIDENCE(artifact_id)')
+
+
+def _rebuild_compaction_event_with_artifact_fk(connection: sqlite3.Connection) -> None:
+    """Rebuild COMPACTION_EVENT so `snapshot_artifact_id` gains a real FK to ARTIFACT.
+
+    Microtask 12 could not declare this FK because SQLite refuses to create a
+    table with a foreign key naming a table that does not exist yet, and
+    ARTIFACT is only added by this migration. This follows SQLite's table-
+    rebuild pattern (create new, copy, drop, rename, recreate indices).
+    COMPACTION_EVENT is only ever a foreign-key *child* (nothing else
+    references it), so the rebuild is safe with `PRAGMA foreign_keys = ON`
+    held throughout: SQLite only refuses to drop a table that is itself the
+    *parent* of a still-enforced foreign key.
+    """
+    connection.execute(
+        'CREATE TABLE COMPACTION_EVENT_NEW ('
+        'id TEXT PRIMARY KEY, '
+        'agent_session_id TEXT NOT NULL REFERENCES AGENT_SESSION(id), '
+        'trigger TEXT NOT NULL, '
+        'threshold_percent INTEGER '
+        'CHECK (threshold_percent IS NULL OR threshold_percent BETWEEN 0 AND 100), '
+        'pre_tokens INTEGER CHECK (pre_tokens IS NULL OR pre_tokens >= 0), '
+        'post_tokens INTEGER CHECK (post_tokens IS NULL OR post_tokens >= 0), '
+        'snapshot_artifact_id TEXT REFERENCES ARTIFACT(id), '
+        'created_at TEXT NOT NULL'
+        ')'
+    )
+    connection.execute(
+        'INSERT INTO COMPACTION_EVENT_NEW '
+        '(id, agent_session_id, trigger, threshold_percent, '
+        'pre_tokens, post_tokens, snapshot_artifact_id, created_at) '
+        'SELECT id, agent_session_id, trigger, threshold_percent, '
+        'pre_tokens, post_tokens, snapshot_artifact_id, created_at '
+        'FROM COMPACTION_EVENT'
+    )
+    connection.execute('DROP TABLE COMPACTION_EVENT')
+    connection.execute('ALTER TABLE COMPACTION_EVENT_NEW RENAME TO COMPACTION_EVENT')
+    connection.execute(
+        'CREATE INDEX idx_compaction_event_agent_session_id '
+        'ON COMPACTION_EVENT(agent_session_id)'
+    )
+    connection.execute(
+        'CREATE INDEX idx_compaction_event_snapshot_artifact_id '
+        'ON COMPACTION_EVENT(snapshot_artifact_id)'
+    )
+
+
+def _add_evidence_schema(connection: sqlite3.Connection) -> None:
+    """Add artifact/evidence provenance schema (SPEC.md §23 Microtask 13, §17.2)."""
+    _create_artifact(connection)
+    _create_evidence(connection)
+    _rebuild_compaction_event_with_artifact_fk(connection)
+
+
 def _add_execution_schema(connection: sqlite3.Connection) -> None:
     """Add the execution/token-accounting tables (SPEC.md §23 Microtask 12, §17.1)."""
     _create_user_session(connection)
@@ -322,7 +425,7 @@ def _add_execution_schema(connection: sqlite3.Connection) -> None:
     _create_compaction_event(connection)
 
 
-SUPPORTED_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSION = 3
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
@@ -332,5 +435,10 @@ MIGRATIONS: tuple[Migration, ...] = (
         to_version=2,
         description='add execution and token-accounting schema',
         apply=_add_execution_schema,
+    ),
+    Migration(
+        to_version=3,
+        description='add artifact and evidence provenance schema',
+        apply=_add_evidence_schema,
     ),
 )
