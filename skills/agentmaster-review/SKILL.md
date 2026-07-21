@@ -183,9 +183,9 @@ machine-readable JSON object as your final output:
 GOOD requires `reviewed_sha` to equal the exact requested head; never emit
 GOOD for a different commit, and never emit a result missing any of the
 fields above — a malformed result is a failed review, never GOOD. The
-orchestrator records this object via `ledger.review.record_review`
-(`ledger.review_gate.apply_review_result` applies the verdict): out-of-scope
-concerns you notice belong in `summary` prose, not in `findings` — findings
+orchestrator records this object via `agentmaster delivery record-review`
+(wraps `ledger.review_gate.apply_review_result`, which applies the verdict):
+out-of-scope concerns you notice belong in `summary` prose, not in `findings` — findings
 are exactly the work items the orchestrator will convert into accepted task
 work on NEEDS_FIXES.
 

@@ -117,6 +117,13 @@ COMMAND_REGISTRY: tuple[CommandEntry, ...] = (
         name='merge-gate',
         description='Repeat the review-gate checks and merge on an exact head match.',
     ),
+    CommandEntry(
+        group='delivery',
+        name='record-review',
+        description=(
+            'Persist an independent reviewer verdict/findings and apply the review gate.'
+        ),
+    ),
 )
 
 
