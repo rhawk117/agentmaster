@@ -56,3 +56,40 @@ def test_a_write_crash_leaves_no_partial_artifact(tmp_path, monkeypatch):
     assert not store.path_for(digest).exists()
     leftover = list((tmp_path / 'sha256').iterdir())
     assert leftover == []
+
+
+def test_path_for_rejects_a_traversal_attempt(tmp_path):
+    store = ArtifactStore(tmp_path)
+
+    with pytest.raises(ValueError, match='not a valid sha256 hex digest'):
+        store.path_for('../evil')
+
+
+def test_path_for_rejects_uppercase_hex(tmp_path):
+    store = ArtifactStore(tmp_path)
+    digest = content_address(b'hello').upper()
+
+    with pytest.raises(ValueError, match='not a valid sha256 hex digest'):
+        store.path_for(digest)
+
+
+def test_path_for_rejects_a_short_digest(tmp_path):
+    store = ArtifactStore(tmp_path)
+
+    with pytest.raises(ValueError, match='not a valid sha256 hex digest'):
+        store.path_for('abc123')
+
+
+def test_read_rejects_an_invalid_digest(tmp_path):
+    store = ArtifactStore(tmp_path)
+
+    with pytest.raises(ValueError, match='not a valid sha256 hex digest'):
+        store.read('../evil')
+
+
+def test_round_trip_still_works_for_a_valid_digest(tmp_path):
+    store = ArtifactStore(tmp_path)
+
+    write = store.put(b'valid payload')
+
+    assert store.read(write.sha256) == b'valid payload'

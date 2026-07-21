@@ -8,9 +8,12 @@ place, so a crash mid-write never leaves a partial file at the final path.
 
 import hashlib
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+_SHA256_HEX = re.compile(r'^[0-9a-f]{64}$')
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +39,17 @@ class ArtifactStore:
         self._sha256_root.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     def path_for(self, sha256: str) -> Path:
-        """Return the on-disk path for the artifact identified by `sha256`."""
+        """Return the on-disk path for the artifact identified by `sha256`.
+
+        Raises
+        ------
+        ValueError
+            If `sha256` is not a 64-character lowercase hex digest, so a
+            malformed or traversal-crafted digest can never be used to
+            build a path outside the artifact root.
+        """
+        if not _SHA256_HEX.fullmatch(sha256):
+            raise ValueError(f'not a valid sha256 hex digest: {sha256!r}')
         return self._sha256_root / sha256
 
     def put(self, data: bytes) -> ArtifactWrite:

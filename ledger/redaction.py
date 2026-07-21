@@ -5,6 +5,15 @@ anything touches disk, so a secret is never hashed merely to claim it is
 safe to store. Everything not explicitly allow-listed is treated as unsafe:
 env values are masked unless their name is allow-listed, and filesystem
 paths are masked unless they fall under an allowed root.
+
+Generic env-value masking only fires for values at least
+`_MIN_ENV_VALUE_LENGTH` bytes long: masking every short value wholesale
+would redact common non-secret values (`"1"`, `"true"`, single path
+segments) throughout captured output. This threshold applies only to
+*generic* env values matched by exact substring; it never gates a known
+token-prefix pattern (`sk-`, `ghp_`, `github_pat_`, `AKIA`, a JWT header,
+a PEM block, ...) — those match regardless of length, because the prefix
+itself is the signal, not the length.
 """
 
 import re
@@ -28,12 +37,18 @@ _SECRET_KEY_ASSIGNMENT = re.compile(
 )
 
 _PROVIDER_TOKEN_PATTERNS = (
-    re.compile(rb'sk-ant-[A-Za-z0-9_-]{20,}'),  # Anthropic
-    re.compile(rb'sk-[A-Za-z0-9]{20,}'),  # OpenAI-style
-    re.compile(rb'gh[pousr]_[A-Za-z0-9]{20,}'),  # GitHub tokens
-    re.compile(rb'AKIA[0-9A-Z]{16}'),  # AWS access key id
+    re.compile(rb'sk-ant-[A-Za-z0-9_-]+'),  # Anthropic
+    re.compile(rb'sk-[A-Za-z0-9]+'),  # OpenAI-style, including short test tokens
+    re.compile(rb'gh[pousr]_[A-Za-z0-9]+'),  # GitHub classic PATs/tokens
+    re.compile(rb'github_pat_[A-Za-z0-9_]+'),  # GitHub fine-grained PAT
+    re.compile(rb'AKIA[0-9A-Z]{16}'),  # AWS access key id (fixed-width by spec)
     re.compile(rb'xox[baprs]-[A-Za-z0-9-]+'),  # Slack tokens
     re.compile(rb'(?i)bearer\s+[A-Za-z0-9._~+/=-]{8,}'),  # Bearer/Authorization headers
+    re.compile(rb'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'),  # bare JWT
+    re.compile(
+        rb'-----BEGIN [^-\n]*PRIVATE KEY-----.*?-----END [^-\n]*PRIVATE KEY-----',
+        re.DOTALL,
+    ),  # PEM private-key block, mask through END including embedded newlines
 )
 
 _UNIX_PATH = re.compile(rb'(?<![\w/])/(?:[\w.@%+-]+/)+[\w.@%+-]+')
@@ -59,11 +74,16 @@ def redact(data: bytes, policy: RedactionPolicy | None = None) -> bytes:
     policy = policy if policy is not None else RedactionPolicy()
     safe_values = _allow_listed_values(policy)
     result = _redact_environment_values(data, policy)
+    # Provider-token patterns (including the multi-line PEM block) run before
+    # the generic key=value sweep: otherwise a preceding label like "key:"
+    # lets _SECRET_KEY_ASSIGNMENT consume just the "-----BEGIN" marker as a
+    # single-token value, destroying it before the PEM pattern can match and
+    # leaving the private-key body unredacted.
+    for pattern in _PROVIDER_TOKEN_PATTERNS:
+        result = pattern.sub(_MASK, result)
     result = _SECRET_KEY_ASSIGNMENT.sub(
         lambda match: match.group(1) + b'=' + _MASK, result
     )
-    for pattern in _PROVIDER_TOKEN_PATTERNS:
-        result = pattern.sub(_MASK, result)
     result = _redact_paths(result, policy.allowed_roots, safe_values)
     for pattern in policy.extra_patterns:
         result = pattern.sub(_MASK, result)
