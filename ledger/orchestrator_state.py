@@ -57,6 +57,21 @@ RUN_TRANSITIONS: dict[str, tuple[str, ...]] = {
     'Cancelled': (),
 }
 
+# SPEC.md §20.3: "A stop hook blocks successful execution termination while
+# the state is REVIEW_REQUIRED, REVIEWING, FIXES_REQUIRED, MERGE_PENDING, or
+# RETROSPECTIVE_PENDING." `hooks/execute_stop.py` cannot import this module
+# (hook processes run standalone, copied without the `ledger` package), so it
+# duplicates this exact set as a literal -- this constant is that set's
+# source of truth for the orchestrator-side callers (`ledger.review_gate`)
+# that can import it directly.
+BLOCKING_COMPLETION_STATES: frozenset[str] = frozenset({
+    'ReviewRequired',
+    'Reviewing',
+    'FixesRequired',
+    'MergePending',
+    'RetrospectivePending',
+})
+
 TASK_TERMINAL_STATES: frozenset[str] = frozenset({'complete'})
 
 TASK_TRANSITIONS: dict[str, tuple[str, ...]] = {

@@ -127,6 +127,7 @@ MANIFEST = Manifest(
     claude_hooks=(
         'cost_boundary.py',
         'dispatch_guard.py',
+        'execute_stop.py',
         'hooklib.py',
         'precompact_snapshot.py',
         'session_context.py',
