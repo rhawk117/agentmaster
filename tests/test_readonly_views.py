@@ -1,9 +1,10 @@
 """Tests for the stable, read-only views SPEC.md §18 names for retrospective code.
 
-`v_delivery_current_head` and `v_unresolved_review_findings` reference
-DELIVERY_ATTEMPT, CI_CHECK, REVIEW, and REVIEW_FINDING, which do not exist
-until Microtask 22 (§17.1); they are asserted to exist as views but are not
-exercised with data here, matching `ledger/schema.py::_create_readonly_views`.
+`v_delivery_current_head` and `v_unresolved_review_findings` forward-referenced
+DELIVERY_ATTEMPT, CI_CHECK, REVIEW, and REVIEW_FINDING (§17.1) before those
+tables existed; Microtask 21 (§23) added all four, so both views are now
+queryable and exercised with seeded data below rather than only asserted to
+exist.
 """
 
 import sqlite3
@@ -25,7 +26,6 @@ _ALL_VIEWS = (
     'v_unresolved_review_findings',
     'v_retention_candidates',
 )
-_FORWARD_REFERENCING_VIEWS = ('v_delivery_current_head', 'v_unresolved_review_findings')
 _CREATED_AT = '2026-07-20T00:00:00Z'
 
 
@@ -115,14 +115,94 @@ def test_a_view_rejects_a_direct_insert(tmp_path, view):
     connection.close()
 
 
+_BASE_SHA = 'a' * 40
+_HEAD_SHA = 'b' * 40
+
+
 @pytest.mark.sqlite
-@pytest.mark.parametrize('view', _FORWARD_REFERENCING_VIEWS)
-def test_a_forward_referencing_view_is_not_yet_queryable(tmp_path, view):
+def test_v_delivery_current_head_reflects_a_delivery_attempt_ci_check_and_review(
+    tmp_path,
+):
     connection = connect(tmp_path / 'ledger.sqlite3')
     migrate(connection)
+    _seed_run(connection)
+    connection.execute(
+        'INSERT INTO DELIVERY_ATTEMPT '
+        '(id, run_id, attempt_no, branch, base_sha, head_sha, pr_number, state, '
+        'created_at) '
+        "VALUES ('delivery-1', 'run-1', 1, 'feat/x', ?, ?, 7, 'open', ?)",
+        (_BASE_SHA, _HEAD_SHA, _CREATED_AT),
+    )
+    connection.execute(
+        'INSERT INTO CI_CHECK '
+        '(id, delivery_attempt_id, name, head_sha, status, conclusion, observed_at) '
+        "VALUES ('check-1', 'delivery-1', 'ci', ?, 'completed', 'success', ?)",
+        (_HEAD_SHA, _CREATED_AT),
+    )
+    connection.execute(
+        'INSERT INTO AGENT_SESSION '
+        '(id, run_id, role, provider, model, state, started_at) '
+        "VALUES ('reviewer-1', 'run-1', 'reviewer', 'claude', 'opus', 'active', ?)",
+        (_CREATED_AT,),
+    )
+    connection.execute(
+        'INSERT INTO REVIEW '
+        '(id, delivery_attempt_id, reviewer_session_id, reviewed_sha, verdict, '
+        'created_at) '
+        "VALUES ('review-1', 'delivery-1', 'reviewer-1', ?, 'GOOD', ?)",
+        (_HEAD_SHA, _CREATED_AT),
+    )
+    connection.commit()
 
-    with pytest.raises(sqlite3.OperationalError, match='no such table'):
-        connection.execute(f'SELECT * FROM {view}')  # noqa: S608
+    row = connection.execute(
+        'SELECT delivery_attempt_id, pr_number, ci_status, ci_conclusion, '
+        'reviewed_sha, review_verdict FROM v_delivery_current_head '
+        "WHERE delivery_attempt_id = 'delivery-1'"
+    ).fetchone()
+
+    assert row == ('delivery-1', 7, 'completed', 'success', _HEAD_SHA, 'GOOD')
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_v_unresolved_review_findings_excludes_a_resolved_finding(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_run(connection)
+    connection.execute(
+        'INSERT INTO DELIVERY_ATTEMPT '
+        '(id, run_id, attempt_no, branch, base_sha, head_sha, state, created_at) '
+        "VALUES ('delivery-1', 'run-1', 1, 'feat/x', ?, ?, 'open', ?)",
+        (_BASE_SHA, _HEAD_SHA, _CREATED_AT),
+    )
+    connection.execute(
+        'INSERT INTO AGENT_SESSION '
+        '(id, run_id, role, provider, model, state, started_at) '
+        "VALUES ('reviewer-1', 'run-1', 'reviewer', 'claude', 'opus', 'active', ?)",
+        (_CREATED_AT,),
+    )
+    connection.execute(
+        'INSERT INTO REVIEW '
+        '(id, delivery_attempt_id, reviewer_session_id, reviewed_sha, verdict, '
+        'created_at) '
+        "VALUES ('review-1', 'delivery-1', 'reviewer-1', ?, 'NEEDS_FIXES', ?)",
+        (_HEAD_SHA, _CREATED_AT),
+    )
+    connection.execute(
+        'INSERT INTO REVIEW_FINDING (id, review_id, severity, state, summary) '
+        "VALUES ('finding-open', 'review-1', 'blocker', 'open', 'fix me')"
+    )
+    connection.execute(
+        'INSERT INTO REVIEW_FINDING (id, review_id, severity, state, summary) '
+        "VALUES ('finding-resolved', 'review-1', 'minor', 'resolved', 'already fixed')"
+    )
+    connection.commit()
+
+    rows = connection.execute(
+        'SELECT review_finding_id, reviewed_sha FROM v_unresolved_review_findings'
+    ).fetchall()
+
+    assert rows == [('finding-open', _HEAD_SHA)]
     connection.close()
 
 

@@ -156,6 +156,39 @@ this context is ever compacted.
   after the second, surface anything still open to the user with your
   recommendation rather than looping again.
 
+## Deterministic delivery-gate mode
+
+When invoked with `--deterministic <reviewed-sha>` (the orchestrator's
+delivery pipeline, after CI is green at that exact head — SPEC.md §20.3),
+this is an independent review of a specific commit, not the interactive loop
+above: dispatch a fresh session, never one that touched the implementation,
+and never accept a self-reported "review complete" claim without running
+this pipeline yourself. In addition to the normal report, emit exactly one
+machine-readable JSON object as your final output:
+
+```json
+{
+  "schema_version": 1,
+  "reviewed_sha": "<40-hex commit — must equal the requested head>",
+  "verdict": "GOOD | NEEDS_FIXES",
+  "findings": [
+    {"severity": "...", "summary": "...", "criterion_id": null,
+     "file_path": null, "line_no": null, "evidence_id": null}
+  ],
+  "evidence_gaps": ["..."],
+  "summary": "..."
+}
+```
+
+GOOD requires `reviewed_sha` to equal the exact requested head; never emit
+GOOD for a different commit, and never emit a result missing any of the
+fields above — a malformed result is a failed review, never GOOD. The
+orchestrator records this object via `ledger.review.record_review`
+(`ledger.review_gate.apply_review_result` applies the verdict): out-of-scope
+concerns you notice belong in `summary` prose, not in `findings` — findings
+are exactly the work items the orchestrator will convert into accepted task
+work on NEEDS_FIXES.
+
 ## Output
 
 Return the review report only: verdict, adjudicated findings with severity,
