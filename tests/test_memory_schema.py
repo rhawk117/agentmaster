@@ -37,7 +37,7 @@ def test_fresh_init_reaches_the_memory_schema_version(tmp_path):
 
     final_version = migrate(connection)
 
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 4
+    assert final_version == SUPPORTED_SCHEMA_VERSION == 5
     connection.close()
 
 

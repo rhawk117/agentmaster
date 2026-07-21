@@ -585,6 +585,93 @@ def _add_memory_schema(connection: sqlite3.Connection) -> None:
     _create_feedback(connection)
 
 
+_MEMORY_FTS_SYNC_STATES = ('Active', 'Validated')  # SPEC.md §17.5
+
+
+def _create_memory_fts(connection: sqlite3.Connection) -> None:
+    """memory_fts: external-content FTS5 index over active/validated memories (§17.5).
+
+    Triggers keep the index in sync with `MEMORY` (§16.3 sanctions triggers
+    only for FTS synchronization): a row is indexed only while its state is
+    Active or Validated, so a content edit or a lifecycle transition removes
+    the stale entry before (re)inserting the current one.
+    """
+    connection.execute(
+        'CREATE VIRTUAL TABLE memory_fts USING fts5('
+        "title, content, content='MEMORY', content_rowid='rowid'"
+        ')'
+    )
+    # `sync_states` interpolates only the hardcoded _MEMORY_FTS_SYNC_STATES
+    # tuple, never external input.
+    sync_states = _in_clause(_MEMORY_FTS_SYNC_STATES)
+    connection.execute(
+        'CREATE TRIGGER memory_fts_ai AFTER INSERT ON MEMORY '  # noqa: S608
+        f'WHEN new.state IN ({sync_states}) '
+        'BEGIN '
+        'INSERT INTO memory_fts(rowid, title, content) '
+        'VALUES (new.rowid, new.title, new.content); '
+        'END'
+    )
+    connection.execute(
+        'CREATE TRIGGER memory_fts_ad AFTER DELETE ON MEMORY '  # noqa: S608
+        f'WHEN old.state IN ({sync_states}) '
+        'BEGIN '
+        'INSERT INTO memory_fts(memory_fts, rowid, title, content) '
+        "VALUES ('delete', old.rowid, old.title, old.content); "
+        'END'
+    )
+    connection.execute(
+        'CREATE TRIGGER memory_fts_au AFTER UPDATE ON MEMORY '
+        'BEGIN '
+        'INSERT INTO memory_fts(memory_fts, rowid, title, content) '
+        f"SELECT 'delete', old.rowid, old.title, old.content "
+        f'WHERE old.state IN ({sync_states}); '
+        'INSERT INTO memory_fts(rowid, title, content) '
+        f'SELECT new.rowid, new.title, new.content '
+        f'WHERE new.state IN ({sync_states}); '
+        'END'
+    )
+
+
+def _create_memory_access(connection: sqlite3.Connection) -> None:
+    """memory_access: one retrieval-pack row logging why a memory was shown (§17.5)."""
+    connection.execute(
+        'CREATE TABLE memory_access ('
+        'id TEXT PRIMARY KEY, '
+        'run_id TEXT NOT NULL REFERENCES RUN(id), '
+        'task_id TEXT REFERENCES TASK(id), '
+        'agent_session_id TEXT REFERENCES AGENT_SESSION(id), '
+        'memory_id TEXT NOT NULL REFERENCES MEMORY(id), '
+        'query_digest TEXT NOT NULL, '
+        'rank INTEGER NOT NULL CHECK (rank >= 0), '
+        'score REAL NOT NULL, '
+        'selected INTEGER NOT NULL DEFAULT 0 CHECK (selected IN (0, 1)), '
+        'estimated_tokens INTEGER '
+        'CHECK (estimated_tokens IS NULL OR estimated_tokens >= 0), '
+        'used INTEGER CHECK (used IS NULL OR used IN (0, 1)), '
+        'helpful INTEGER CHECK (helpful IS NULL OR helpful IN (0, 1)), '
+        'harmful INTEGER CHECK (harmful IS NULL OR harmful IN (0, 1)), '
+        'retrieval_algorithm_version TEXT NOT NULL, '
+        'created_at TEXT NOT NULL'
+        ')'
+    )
+    connection.execute('CREATE INDEX idx_memory_access_run_id ON memory_access(run_id)')
+    connection.execute('CREATE INDEX idx_memory_access_task_id ON memory_access(task_id)')
+    connection.execute(
+        'CREATE INDEX idx_memory_access_agent_session_id '
+        'ON memory_access(agent_session_id)'
+    )
+    connection.execute(
+        'CREATE INDEX idx_memory_access_memory_id ON memory_access(memory_id)'
+    )
+
+
+def _add_memory_retrieval_schema(connection: sqlite3.Connection) -> None:
+    """Add the FTS5 retrieval index and access logging (SPEC.md §23 MT14 commit 2)."""
+    _create_memory_fts(connection)
+    _create_memory_access(connection)
+
+
 def _add_execution_schema(connection: sqlite3.Connection) -> None:
     """Add the execution/token-accounting tables (SPEC.md §23 Microtask 12, §17.1)."""
     _create_user_session(connection)
@@ -599,7 +686,7 @@ def _add_execution_schema(connection: sqlite3.Connection) -> None:
     _create_compaction_event(connection)
 
 
-SUPPORTED_SCHEMA_VERSION = 4
+SUPPORTED_SCHEMA_VERSION = 5
 
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(
@@ -619,5 +706,10 @@ MIGRATIONS: tuple[Migration, ...] = (
         to_version=4,
         description='add scoped evidence-backed memory schema and feedback',
         apply=_add_memory_schema,
+    ),
+    Migration(
+        to_version=5,
+        description='add memory FTS5 retrieval index and access logging',
+        apply=_add_memory_retrieval_schema,
     ),
 )
