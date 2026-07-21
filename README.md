@@ -247,6 +247,14 @@ permissively across CLI versions.
 > Set `AGENTMASTER_HOOK_DEBUG=1` to dump raw hook payloads to
 > `.agentmaster/hook-debug.jsonl` for one-run verification.
 
+## Migrating from v1
+
+Upgrading an existing v1 install? See [`MIGRATION.md`](MIGRATION.md) for the
+full v1-to-v2 guide: the per-role model/effort flags that replaced a single
+`--model`, the SQLite ledger that replaced the markdown ledgers, config
+precedence, backup/restore, non-destructive legacy-artifact import, delivery
+modes, and worked examples for common scenarios.
+
 ## Development
 
 One command verifies the repository, and CI runs exactly it:
