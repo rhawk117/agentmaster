@@ -149,6 +149,99 @@ def test_recover_run_requires_user_direction_is_idempotent(ledger_connection):
 
 
 @pytest.mark.sqlite
+def test_recover_run_releases_a_stale_lease_from_fixes_required(ledger_connection):
+    seed = seed_project_run_task(ledger_connection)
+    _seed_agent_session(ledger_connection, seed.run_id, 'agent-session-1')
+    _advance_run(ledger_connection, seed.run_id, 'Preflight', 'Executing', 'Verifying')
+    transition_task(
+        ledger_connection,
+        'task-1',
+        'running',
+        TaskTransitionInput(
+            now=_now(), id_factory=_id, lease_agent_session_id='agent-session-1'
+        ),
+    )
+    _advance_run(ledger_connection, seed.run_id, 'FixesRequired')
+
+    report = recover_run(ledger_connection, seed.run_id, now=_now(), id_factory=_id)
+
+    assert report.requires_user_direction is False
+    assert report.released_task_ids == ('task-1',)
+    row = ledger_connection.execute(
+        'SELECT state, lease_agent_session_id FROM TASK WHERE id = ?', ('task-1',)
+    ).fetchone()
+    assert row == ('blocked', None)
+
+
+@pytest.mark.sqlite
+def test_recover_run_advances_merged_to_retrospective_pending(ledger_connection):
+    seed = seed_project_run_task(ledger_connection)
+    _advance_run(
+        ledger_connection,
+        seed.run_id,
+        'Preflight',
+        'Executing',
+        'Verifying',
+        'DeliveryPending',
+        'CIPending',
+        'ReviewRequired',
+        'Reviewing',
+        'MergePending',
+        'Merged',
+    )
+
+    report = recover_run(ledger_connection, seed.run_id, now=_now(), id_factory=_id)
+
+    assert report.requires_user_direction is False
+    assert report.released_task_ids == ()
+    state = ledger_connection.execute(
+        'SELECT state FROM RUN WHERE id = ?', (seed.run_id,)
+    ).fetchone()[0]
+    assert state == 'RetrospectivePending'
+    events = ledger_connection.execute(
+        'SELECT COUNT(*) FROM RECOVERY_EVENT WHERE run_id = ? '
+        "AND decision = 'advanced-to-retrospective-pending'",
+        (seed.run_id,),
+    ).fetchone()[0]
+    assert events == 1
+
+
+@pytest.mark.sqlite
+def test_recover_run_flags_retrospective_pending_as_resumable(ledger_connection):
+    seed = seed_project_run_task(ledger_connection)
+    _advance_run(
+        ledger_connection,
+        seed.run_id,
+        'Preflight',
+        'Executing',
+        'Verifying',
+        'DeliveryPending',
+        'CIPending',
+        'ReviewRequired',
+        'Reviewing',
+        'MergePending',
+        'Merged',
+        'RetrospectivePending',
+    )
+
+    report = recover_run(ledger_connection, seed.run_id, now=_now(), id_factory=_id)
+    second = recover_run(ledger_connection, seed.run_id, now=_now(), id_factory=_id)
+
+    assert report.requires_user_direction is False
+    assert second.requires_user_direction is False
+    state = ledger_connection.execute(
+        'SELECT state FROM RUN WHERE id = ?', (seed.run_id,)
+    ).fetchone()[0]
+    assert state == 'RetrospectivePending'
+    events = ledger_connection.execute(
+        'SELECT COUNT(*) FROM RECOVERY_EVENT WHERE run_id = ? '
+        "AND decision = 'retrospective-resumable'",
+        (seed.run_id,),
+    ).fetchone()[0]
+    assert events == 1
+
+
+@pytest.mark.sqlite
 def test_recover_run_is_a_no_op_when_nothing_needs_reconciling(ledger_connection):
     seed = seed_project_run_task(ledger_connection)
     _advance_run(ledger_connection, seed.run_id, 'Preflight', 'Executing')

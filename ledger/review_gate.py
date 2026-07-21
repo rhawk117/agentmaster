@@ -138,7 +138,7 @@ def apply_review_result(
 
     unresolved = _accept_open_findings(connection, recorded.review_id)
     attempts = _needs_fixes_review_count(connection, review_input.delivery_attempt_id)
-    if attempts > MAX_REVIEW_ATTEMPTS:
+    if attempts >= MAX_REVIEW_ATTEMPTS:
         transition_run(
             connection,
             run_id,

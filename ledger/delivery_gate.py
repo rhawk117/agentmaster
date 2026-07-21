@@ -33,8 +33,9 @@ if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Sequence
 
-# GitHub Checks API conclusions that count as a green result.
-_GREEN_CONCLUSIONS = frozenset({'success', 'neutral'})
+# GitHub Checks API conclusions that count as a green result. SPEC.md:1477
+# requires "all required checks are successful" -- only 'success' counts.
+_GREEN_CONCLUSIONS = frozenset({'success'})
 
 
 class DeliveryAttemptNotFoundError(ValueError):

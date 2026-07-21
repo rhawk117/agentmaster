@@ -2,17 +2,21 @@
 
 Ledger-only recovery: it reconciles what the ledger itself can prove (stale
 task leases left behind by a killed dispatch process) and refuses to guess
-at what it cannot — a RUN already past `DeliveryPending` needs git
-branch/head, PR, CI, or review state to reconcile safely, and none of
-DELIVERY_ATTEMPT/CI_CHECK/REVIEW exist yet (they arrive with Microtasks
-21/22). For those states this module records that user direction is
-required instead of silently no-opping or guessing (SPEC.md §9: the
-orchestrator fails closed).
+at what it cannot — a RUN in `DeliveryPending` through `MergePending` needs
+git branch/head, PR, CI, or review state to reconcile safely. For those
+states this module records that user direction is required instead of
+silently no-opping or guessing (SPEC.md §9: the orchestrator fails closed).
+`Merged` and `RetrospectivePending` are past that gap: reaching `Merged` in
+the ledger already means the git publisher's merge call succeeded (`agentmaster
+delivery merge-gate` only transitions the RUN after `merge_pull_request`
+returns), and the one transition onward from there (`RetrospectivePending`)
+needs no external check, so recovery advances it directly; `RetrospectivePending`
+itself is resumable in place because `run_retrospective` is idempotent.
 
 Every decision `recover_run` makes is recorded as a RECOVERY_EVENT before it
 returns. Re-running recovery on an already-consistent database — no stale
-lease left, or the same "needs user direction" state already recorded — is
-a no-op: it takes no further action and appends no further event.
+lease left, or the same decision already recorded for that state — is a
+no-op: it takes no further action and appends no further event.
 """
 
 import uuid
@@ -21,7 +25,9 @@ from typing import TYPE_CHECKING
 
 from ledger.orchestrator_state import (
     RunNotFoundError,
+    RunTransitionInput,
     TaskTransitionInput,
+    transition_run,
     transition_task,
 )
 from ledger.transactions import run_write_transaction
@@ -51,6 +57,15 @@ _EXTERNAL_RECONCILIATION_RUN_STATES = frozenset({
 })
 
 STALE_LEASE_REASON = 'recovered after interruption: released a stale running lease'
+MERGED_ADVANCE_REASON = (
+    'recovered after interruption: Merged needs no external reconciliation -- '
+    'the git publisher only records Merged after the GitHub merge succeeds -- '
+    'so recovery advanced the RUN to RetrospectivePending'
+)
+RETROSPECTIVE_RESUMABLE_REASON = (
+    'recovered after interruption: RetrospectivePending is resumable in place '
+    'because run_retrospective is idempotent'
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,13 +154,13 @@ def _release_stale_leases(
     return tuple(stale_task_ids)
 
 
-def _already_flagged_for_user_direction(
-    connection: sqlite3.Connection, run_id: str, *, state: str
+def _already_recorded_run_decision(
+    connection: sqlite3.Connection, run_id: str, *, decision: str, detail: str
 ) -> bool:
     row = connection.execute(
         'SELECT 1 FROM RECOVERY_EVENT WHERE run_id = ? AND task_id IS NULL '
-        "AND decision = 'requires-user-direction' AND detail = ?",
-        (run_id, state),
+        'AND decision = ? AND detail = ?',
+        (run_id, decision, detail),
     ).fetchone()
     return row is not None
 
@@ -171,7 +186,9 @@ def recover_run(
             f'RUN {run_id} is in {state}, which needs git/CI/review reconciliation '
             'not yet available to ledger-only recovery; user direction is required'
         )
-        if not _already_flagged_for_user_direction(connection, run_id, state=state):
+        if not _already_recorded_run_decision(
+            connection, run_id, decision='requires-user-direction', detail=state
+        ):
             _record_recovery_event(
                 connection,
                 _RecoveryEvent(
@@ -186,6 +203,51 @@ def recover_run(
             run_id=run_id,
             requires_user_direction=True,
             reason=reason,
+            released_task_ids=(),
+        )
+
+    if state == 'Merged':
+        transition_run(
+            connection,
+            run_id,
+            'RetrospectivePending',
+            RunTransitionInput(now=now, id_factory=id_factory),
+        )
+        _record_recovery_event(
+            connection,
+            _RecoveryEvent(
+                run_id=run_id,
+                task_id=None,
+                decision='advanced-to-retrospective-pending',
+                detail=MERGED_ADVANCE_REASON,
+                now=now,
+            ),
+        )
+        return RecoveryReport(
+            run_id=run_id,
+            requires_user_direction=False,
+            reason=MERGED_ADVANCE_REASON,
+            released_task_ids=(),
+        )
+
+    if state == 'RetrospectivePending':
+        if not _already_recorded_run_decision(
+            connection, run_id, decision='retrospective-resumable', detail=state
+        ):
+            _record_recovery_event(
+                connection,
+                _RecoveryEvent(
+                    run_id=run_id,
+                    task_id=None,
+                    decision='retrospective-resumable',
+                    detail=state,
+                    now=now,
+                ),
+            )
+        return RecoveryReport(
+            run_id=run_id,
+            requires_user_direction=False,
+            reason=RETROSPECTIVE_RESUMABLE_REASON,
             released_task_ids=(),
         )
 
