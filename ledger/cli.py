@@ -1,13 +1,16 @@
 """Ledger init/migrate/backup/doctor commands (SPEC.md §19).
 
 A minimal repository script per SPEC.md §19 ("the exact packaging may be
-python -m agentmaster ... or a repository script"); a later microtask wires
-these into the unified `agentmaster` command entry point.
+python -m agentmaster ... or a repository script"); `agentmaster.cli` (SPEC.md
+§23 Microtask 16) wires these into the unified `agentmaster` command entry
+point and adds the remaining §19 ledger/memory/context commands.
 """
 
 import argparse
+import json
 import sqlite3
 import sys
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ledger.backup import backup_to
@@ -63,7 +66,20 @@ def cmd_backup(ledger_path: Path, destination: Path) -> int:
     return 0
 
 
-def cmd_doctor(ledger_path: Path) -> int:
+@dataclass(frozen=True, slots=True)
+class DoctorReport:
+    """The `doctor` command's findings (SPEC.md §19)."""
+
+    schema_version: int
+    supported_schema_version: int
+    journal_mode: str
+    integrity_check: str
+    journaling_reason: str | None
+    pending_migrations: int
+    healthy: bool
+
+
+def cmd_doctor(ledger_path: Path, *, json_output: bool = False) -> int:
     """Report schema version, journaling decision, and integrity without mutating.
 
     Returns nonzero if the ledger is missing, its integrity check fails, or
@@ -84,23 +100,40 @@ def cmd_doctor(ledger_path: Path) -> int:
         health = read_health(connection)
     finally:
         connection.close()
-    print(f'schema version: {version} (supported: {SUPPORTED_SCHEMA_VERSION})')
-    print(f'journal mode: {journal_mode}')
-    print(f'integrity check: {integrity}')
-    if health is not None:
-        print(f'journaling reason: {health.reason}')
-    if version < SUPPORTED_SCHEMA_VERSION:
-        print(f'pending migrations: {SUPPORTED_SCHEMA_VERSION - version}')
-    healthy = integrity == 'ok' and version <= SUPPORTED_SCHEMA_VERSION
-    return 0 if healthy else 1
+    report = DoctorReport(
+        schema_version=version,
+        supported_schema_version=SUPPORTED_SCHEMA_VERSION,
+        journal_mode=journal_mode,
+        integrity_check=integrity,
+        journaling_reason=health.reason if health is not None else None,
+        pending_migrations=max(0, SUPPORTED_SCHEMA_VERSION - version),
+        healthy=integrity == 'ok' and version <= SUPPORTED_SCHEMA_VERSION,
+    )
+    if json_output:
+        print(json.dumps(asdict(report)))
+    else:
+        print(
+            f'schema version: {report.schema_version} '
+            f'(supported: {report.supported_schema_version})'
+        )
+        print(f'journal mode: {report.journal_mode}')
+        print(f'integrity check: {report.integrity_check}')
+        if report.journaling_reason is not None:
+            print(f'journaling reason: {report.journaling_reason}')
+        if report.pending_migrations:
+            print(f'pending migrations: {report.pending_migrations}')
+    return 0 if report.healthy else 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='ledger')
     sub = parser.add_subparsers(dest='command', required=True)
-    for name in ('init', 'migrate', 'doctor'):
+    for name in ('init', 'migrate'):
         cmd = sub.add_parser(name)
         cmd.add_argument('--path', required=True)
+    doctor_parser = sub.add_parser('doctor')
+    doctor_parser.add_argument('--path', required=True)
+    doctor_parser.add_argument('--json', action='store_true', dest='json_output')
     backup_parser = sub.add_parser('backup')
     backup_parser.add_argument('--path', required=True)
     backup_parser.add_argument('--destination', required=True)
@@ -116,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_migrate(ledger_path)
     if args.command == 'backup':
         return cmd_backup(ledger_path, Path(args.destination))
-    return cmd_doctor(ledger_path)
+    return cmd_doctor(ledger_path, json_output=args.json_output)
 
 
 if __name__ == '__main__':
