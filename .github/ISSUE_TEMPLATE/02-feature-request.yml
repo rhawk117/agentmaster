@@ -1,0 +1,106 @@
+name: Feature request
+description: Propose a focused improvement to Agentmaster.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the problem first. A concrete use case makes it easier to judge
+        whether the proposed feature belongs in Agentmaster.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or limitation
+      description: What is difficult, unsafe, expensive, or impossible today?
+      placeholder: Describe the problem without assuming a specific solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Show when and how this would be used in a real workflow.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Installer or configuration
+        - Claude Code agents or skills
+        - GitHub Copilot agents or skills
+        - Hooks or telemetry
+        - Ledger, memory, or retrospectives
+        - Harnesses or orchestration
+        - CI or release tooling
+        - Documentation or contributor experience
+        - New integration
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired outcome and user-facing behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or simpler approaches have you considered?
+    validations:
+      required: false
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Suggested scope and non-goals
+      description: Identify a useful first boundary and what should remain out of scope.
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance examples
+      description: Give concrete examples that would demonstrate the feature works.
+      placeholder: |
+        - Given ..., when ..., then ...
+        - The existing ... behavior remains unchanged.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add related issues, research, examples, or screenshots.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+
+        - label: This request describes one coherent problem or capability.
+          required: true
+
+        - label: This request does not contain secrets or private information.
+          required: true
+
+        - label: This is not a privately reportable security vulnerability.
+          required: true

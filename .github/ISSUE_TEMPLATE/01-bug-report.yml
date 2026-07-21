@@ -1,0 +1,122 @@
+name: Bug report
+description: Report reproducible behavior that appears incorrect.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem.
+
+        **Do not disclose vulnerabilities or sensitive details here.** Read the
+        [security policy](https://github.com/rhawk117/agentmaster/security/policy)
+        and use GitHub's private vulnerability reporting flow instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: Agentmaster version
+      description: Provide the installed release or commit SHA.
+      placeholder: v1.1.1 or 0123456789abcdef
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Select the part of Agentmaster where the problem occurs.
+      options:
+        - Installer or uninstall
+        - Claude Code agents or skills
+        - GitHub Copilot agents or skills
+        - Hooks or telemetry
+        - Ledger, memory, or retrospectives
+        - Harnesses or orchestration
+        - CI, release, or generated-file parity
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include your OS, Python version, and relevant client version.
+      placeholder: Ubuntu 24.04, Python 3.14.0, Claude Code x.y.z
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the behavior and its impact clearly.
+      placeholder: Tell us what failed and what you were trying to accomplish.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest reliable reproduction you can.
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Remove tokens, credentials, personal data, and private paths.
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Regression
+      description: Did this work in an earlier Agentmaster version?
+      options:
+        - Unknown
+        - No, this has never worked
+        - Yes, this worked previously
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add screenshots, related issues, or possible causes if useful.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I tested a supported Agentmaster version or current `develop`.
+          required: true
+        - label: I removed secrets and sensitive information from this report.
+          required: true
+        - label: This is not a privately reportable security vulnerability.
+          required: true
