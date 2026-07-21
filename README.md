@@ -178,7 +178,10 @@ worker actually ran on, so pin effectiveness is verifiable from data.
 
 The hook layer owns all telemetry rows: it appends
 `<phase>,<agent>,<model>,<tokens>,<duration_ms>` lines to
-`.agentmaster/telemetry.md`. The phase comes from the `.agentmaster/.phase`
+`.agentmaster/sessions/<harness-session-id>/telemetry.md` (falling back to the
+legacy root `.agentmaster/telemetry.md` for rows written before session
+scoping), so two sessions in one checkout never clobber each other's
+telemetry. The phase comes from the session's `.phase`
 marker the coordinator skills set and clear at phase boundaries (`hook` when
 none is active), the model and tokens from the payload or the subagent
 transcript where the platform reports them, and the wall-clock duration from
@@ -187,8 +190,10 @@ distinguish who compacted: `precompact:main` for the primary session,
 `precompact:implementer` and `precompact:<subagent>` otherwise, with the
 pre-compaction token count in the tokens column when the provider supplies
 it. The skills never hand-append rows. Read the
-running totals per agent, phase, and model with `make telemetry` (or `uv run
-python scripts/telemetry_report.py`). Prune with `make clean-telemetry`: it
+running totals per agent, phase, and model with `make telemetry
+SESSION=.agentmaster/sessions/<id>` (or `uv run python
+scripts/telemetry_report.py <session-dir>/telemetry.md` directly). Prune with
+`make clean-telemetry SESSION=.agentmaster/sessions/<id>`: it
 keeps the newest 500 lines and 5 compaction snapshots and drops `.starts`
 orphans and a stale `.phase` marker older than a day (`--keep-lines`,
 `--keep-snapshots`, and `--dry-run` adjust that). Nothing prunes
@@ -203,7 +208,8 @@ choice.
 analyze-fix-verify loop over the suite's own accumulated artifacts, rather
 than over a single task. Its corpus is fixed by convention: `.transcripts/`
 (prose only — code files inside it are never read), root-level run artifacts
-(run transcripts, generated docs), `.agentmaster/telemetry.md`, and every
+(run transcripts, generated docs), every session's
+`.agentmaster/sessions/<id>/telemetry.md`, and every
 prior `.agentmaster/retro/*.md`. A `scout` inventories the corpus,
 `code-analyst` grades each artifact against a rubric in
 `criteria/retro-criteria.md` — marking each finding

@@ -46,8 +46,8 @@ install-copilot:  ## Install the GitHub Copilot target
 uninstall:  ## Uninstall both targets
 	uv run python install.py uninstall --target all
 
-telemetry:  ## Summarize .agentmaster/telemetry.md
-	uv run python scripts/telemetry_report.py
+telemetry:  ## Summarize a session's telemetry.md (pass SESSION=.agentmaster/sessions/<id>/telemetry.md)
+	uv run python scripts/telemetry_report.py $(SESSION)
 
-clean-telemetry:  ## Prune telemetry, snapshots, and stale starts
-	uv run python scripts/telemetry_report.py --prune
+clean-telemetry:  ## Prune a session's telemetry, snapshots, and stale starts (pass SESSION=.agentmaster/sessions/<id>)
+	uv run python scripts/telemetry_report.py --prune $(if $(SESSION),$(SESSION)/telemetry.md,)
