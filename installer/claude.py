@@ -39,7 +39,7 @@ _SKILL_ROLE = {
     'agentmaster-review': Role.REVIEWER,
 }
 _COST_BOUNDARY_SOURCE = 'python3 "$HOME/.claude/agentmaster/hooks/cost_boundary.py"'
-_ROSTER = '^(scout|code-analyst|plan-critic|implementer|Explore)$'
+_ROSTER = '^(scout|code-analyst|plan-critic|implementer|git-publisher|Explore)$'
 
 
 def _effort_value(role: RoleOverride, fallback: Role) -> str:

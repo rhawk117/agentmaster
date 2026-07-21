@@ -37,7 +37,7 @@ def test_fresh_install_creates_everything(tmp_path: Path, repo_root, statuses) -
 
     assert set(statuses(report.entries)) == {'create'}
     agents = sorted(p.name for p in (home / 'agents').glob('*.agent.md'))
-    assert len(agents) == 8
+    assert len(agents) == 9
     for skill in (
         'agentmaster-plan',
         'agentmaster-execute',
