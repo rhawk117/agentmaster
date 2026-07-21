@@ -15,6 +15,8 @@ from installer.render import generated_path, render_worker
 
 CRITERIA_START = '<!-- agentmaster:criteria:start -->'
 CRITERIA_END = '<!-- agentmaster:criteria:end -->'
+WRITING_SKILLS_CRITERIA_START = '<!-- agentmaster:writing-skills-criteria:start -->'
+WRITING_SKILLS_CRITERIA_END = '<!-- agentmaster:writing-skills-criteria:end -->'
 
 
 def _sources(root: Path, manifest: Manifest) -> list[Path]:
@@ -83,19 +85,44 @@ def _retro_criteria_targets(root: Path, manifest: Manifest) -> list[Path]:
     return targets
 
 
-# Each canon file is injected verbatim between the criteria markers in every
+def _writing_skills_criteria_targets(root: Path, manifest: Manifest) -> list[Path]:
+    targets = []
+    if 'agentmaster-execute' in manifest.claude_skills:
+        targets.append(root / 'skills' / 'agentmaster-execute' / 'SKILL.md')
+    if 'agentmaster-execute' in manifest.copilot_coordinators:
+        targets.append(root / 'copilot' / 'agents' / 'agentmaster-execute.agent.md')
+    return targets
+
+
+# Each canon file is injected verbatim between its criteria markers in every
 # target its targets-function names. Adding a rubric means adding one
-# (canon path, targets function) pair here — the comparison logic below is
-# unchanged per pair.
+# (canon path, targets function, start marker, end marker) tuple here — the
+# comparison logic below is unchanged per tuple.
 _CRITERIA_CANONS = (
-    (Path('criteria') / 'review-criteria.md', _review_criteria_targets),
-    (Path('criteria') / 'retro-criteria.md', _retro_criteria_targets),
+    (
+        Path('criteria') / 'review-criteria.md',
+        _review_criteria_targets,
+        CRITERIA_START,
+        CRITERIA_END,
+    ),
+    (
+        Path('criteria') / 'retro-criteria.md',
+        _retro_criteria_targets,
+        CRITERIA_START,
+        CRITERIA_END,
+    ),
+    (
+        Path('criteria') / 'writing-skills-criteria.md',
+        _writing_skills_criteria_targets,
+        WRITING_SKILLS_CRITERIA_START,
+        WRITING_SKILLS_CRITERIA_END,
+    ),
 )
 
 
 def _criteria(root: Path, manifest: Manifest) -> list[str]:
     findings = []
-    for canon_rel, targets_fn in _CRITERIA_CANONS:
+    for canon_rel, targets_fn, start_marker, end_marker in _CRITERIA_CANONS:
         targets = [t for t in targets_fn(root, manifest) if t.is_file()]
         if not targets:
             continue
@@ -106,11 +133,11 @@ def _criteria(root: Path, manifest: Manifest) -> list[str]:
         canon = canon_path.read_text(encoding='utf-8').strip()
         for target in targets:
             text = target.read_text(encoding='utf-8')
-            start, end = text.find(CRITERIA_START), text.find(CRITERIA_END)
+            start, end = text.find(start_marker), text.find(end_marker)
             rel = target.relative_to(root).as_posix()
             if start < 0 or end < 0:
                 findings.append(f'criteria markers missing in {rel}')
-            elif text[start + len(CRITERIA_START) : end].strip() != canon:
+            elif text[start + len(start_marker) : end].strip() != canon:
                 findings.append(
                     f'criteria drift: {rel} differs from {canon_rel.as_posix()}'
                 )
