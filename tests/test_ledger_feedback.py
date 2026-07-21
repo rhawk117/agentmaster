@@ -1,45 +1,17 @@
 """Tests for FEEDBACK recording (SPEC.md §17.2, §19, §23 Microtask 16)."""
 
 import pytest
+from conftest import seed_project_run_task
 
-from ledger.connection import connect
 from ledger.feedback import FeedbackInput, UnknownReferenceError, record_feedback
-from ledger.migrations import migrate
 
 _CREATED_AT = '2026-07-20T00:00:00Z'
 
 
-def _seed_run_and_task(connection):
-    connection.execute(
-        'INSERT INTO PROJECT (id, canonical_root, fingerprint, created_at, last_seen_at) '
-        "VALUES ('project-1', '/repo', 'fp-1', ?, ?)",
-        (_CREATED_AT, _CREATED_AT),
-    )
-    connection.execute(
-        'INSERT INTO USER_SESSION (user_session_id, harness_session_id, created_at) '
-        "VALUES ('user-session-1', 'harness-1', ?)",
-        (_CREATED_AT,),
-    )
-    connection.execute(
-        'INSERT INTO RUN '
-        '(id, project_id, user_session_id, delivery_mode, state, started_at) '
-        "VALUES ('run-1', 'project-1', 'user-session-1', 'local', 'Planned', ?)",
-        (_CREATED_AT,),
-    )
-    connection.execute(
-        'INSERT INTO TASK (id, run_id, title, state, sequence_no) '
-        "VALUES ('task-1', 'run-1', 'do the thing', 'ready', 1)"
-    )
-    connection.commit()
-
-
 @pytest.fixture
-def connection(tmp_path):
-    conn = connect(tmp_path / 'ledger.sqlite3')
-    migrate(conn)
-    _seed_run_and_task(conn)
-    yield conn
-    conn.close()
+def connection(ledger_connection):
+    seed_project_run_task(ledger_connection)
+    return ledger_connection
 
 
 @pytest.mark.sqlite

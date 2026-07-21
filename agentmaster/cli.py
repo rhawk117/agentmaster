@@ -183,7 +183,13 @@ def _cmd_memory_show(args: argparse.Namespace) -> int:
 def _cmd_memory_validate(args: argparse.Namespace) -> int:
     connection = connect(Path(args.path))
     try:
-        validate_memory(connection, args.memory_id, args.evidence_id, updated_at=_now())
+        validate_memory(
+            connection,
+            args.memory_id,
+            args.evidence_id,
+            updated_at=_now(),
+            validating_session_id=args.validating_session_id,
+        )
     except (MemoryNotFoundError, IllegalMemoryTransitionError) as error:
         print(f'memory validate: {error}', file=sys.stderr)
         return 1
@@ -343,6 +349,7 @@ def _build_memory_subparser(sub: argparse._SubParsersAction) -> dict[str, Callab
     _add_path_argument(validate_cmd)
     validate_cmd.add_argument('--memory-id', required=True)
     validate_cmd.add_argument('--evidence-id', required=True)
+    validate_cmd.add_argument('--validating-session-id', default=None)
 
     activate_cmd = memory_sub.add_parser('activate')
     _add_path_argument(activate_cmd)
