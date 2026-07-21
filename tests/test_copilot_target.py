@@ -7,13 +7,46 @@ from pathlib import Path
 import pytest
 
 from installer.config import CopilotRoleConfig
-from installer.copilot import default_home, install, uninstall
+from installer.copilot import CopilotInstallOptions, default_home
+from installer.copilot import install as _copilot_install
+from installer.copilot import uninstall as _copilot_uninstall
 
 
 def _roles(
     *, coordinator: str = 'opus-test', implementer: str = 'claude-sonnet-4.6'
 ) -> CopilotRoleConfig:
     return CopilotRoleConfig(coordinator_model=coordinator, implementer_model=implementer)
+
+
+def install(
+    root,
+    home,
+    *,
+    roles=None,
+    dry_run=False,
+    manifest=None,
+    agentmaster_home=None,
+):
+    kwargs = {} if manifest is None else {'manifest': manifest}
+    resolved_agentmaster_home = agentmaster_home or (home.parent / 'agentmaster-home')
+    options = CopilotInstallOptions(
+        roles=roles or _roles(),
+        agentmaster_home=resolved_agentmaster_home,
+        ledger_path=resolved_agentmaster_home / 'ledger.sqlite3',
+        ledger_enabled=True,
+        artifact_path=resolved_agentmaster_home / 'artifacts',
+        dry_run=dry_run,
+        **kwargs,
+    )
+    return _copilot_install(root, home, options)
+
+
+def uninstall(home, *, dry_run=False, agentmaster_home=None):
+    return _copilot_uninstall(
+        home,
+        agentmaster_home=agentmaster_home or (home.parent / 'agentmaster-home'),
+        dry_run=dry_run,
+    )
 
 
 def _hook_commands(agentmaster_json: Path) -> list[str]:
@@ -45,10 +78,11 @@ def test_fresh_install_creates_everything(tmp_path: Path, repo_root, statuses) -
         'agentmaster-retro',
     ):
         assert (home / 'skills' / skill / 'SKILL.md').is_file()
-    hooks = sorted(p.name for p in (home / 'agentmaster-hooks').iterdir())
-    assert len(hooks) == 4
-    for hook in (home / 'agentmaster-hooks').iterdir():
+    hook_files = [p for p in (home / 'agentmaster-hooks').iterdir() if p.suffix == '.py']
+    assert len(hook_files) == 4
+    for hook in hook_files:
         assert hook.stat().st_mode & 0o111
+    assert (home / 'agentmaster-hooks' / 'runtime.json').is_file()
 
     agentmaster_json = home / 'hooks' / 'agentmaster.json'
     for command in _hook_commands(agentmaster_json):
@@ -167,7 +201,10 @@ def test_fake_manifest_installs_only_declared(tmp_path: Path, make_manifest) -> 
     coordinator = (home / 'agents' / 'co.agent.md').read_text(encoding='utf-8')
     assert 'model: m1\n' in coordinator
     assert (home / 'skills' / 'co' / 'SKILL.md').is_file()
-    assert sorted(p.name for p in (home / 'agentmaster-hooks').iterdir()) == ['myhook.py']
+    hook_files = sorted(
+        p.name for p in (home / 'agentmaster-hooks').iterdir() if p.suffix == '.py'
+    )
+    assert hook_files == ['myhook.py']
 
 
 def test_preflight_missing_source_raises_and_writes_nothing(
