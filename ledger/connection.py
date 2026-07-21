@@ -83,10 +83,19 @@ def select_journal_mode(ledger_path: Path) -> JournalDecision:
 
 
 def connect(ledger_path: Path) -> sqlite3.Connection:
-    """Open a ledger connection with foreign keys, busy timeout, and journal mode set."""
+    """Open a ledger connection with foreign keys, busy timeout, and journal mode set.
+
+    Closes the underlying connection before propagating any error raised
+    while applying these settings, so a failed setup never leaks an
+    unclosed SQLite connection.
+    """
     connection = sqlite3.connect(ledger_path, timeout=BUSY_TIMEOUT_MS / 1000)
-    connection.execute('PRAGMA foreign_keys = ON')
-    connection.execute(f'PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}')
-    decision = select_journal_mode(ledger_path)
-    connection.execute(f'PRAGMA journal_mode = {decision.mode}')
+    try:
+        connection.execute('PRAGMA foreign_keys = ON')
+        connection.execute(f'PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}')
+        decision = select_journal_mode(ledger_path)
+        connection.execute(f'PRAGMA journal_mode = {decision.mode}')
+    except sqlite3.Error:
+        connection.close()
+        raise
     return connection

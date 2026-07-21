@@ -82,3 +82,32 @@ def test_select_journal_mode_records_network_filesystem_reason(tmp_path, monkeyp
 
     assert decision.mode == 'DELETE'
     assert 'network filesystem' in decision.reason
+
+
+@pytest.mark.sqlite
+def test_connect_closes_the_connection_if_pragma_setup_fails(tmp_path, monkeypatch):
+    ledger_path = tmp_path / 'ledger.sqlite3'
+    captured: list[sqlite3.Connection] = []
+
+    class _FailingConnection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if not captured:
+                captured.append(self)
+            if sql.startswith('PRAGMA busy_timeout'):
+                raise sqlite3.OperationalError('forced failure')
+            return super().execute(sql, *args, **kwargs)
+
+    real_connect = sqlite3.connect
+
+    def _connect_with_failing_factory(*args, **kwargs):
+        kwargs['factory'] = _FailingConnection
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, 'connect', _connect_with_failing_factory)
+
+    with pytest.raises(sqlite3.OperationalError, match='forced failure'):
+        connect(ledger_path)
+
+    assert len(captured) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match='closed database'):
+        captured[0].execute('SELECT 1')
