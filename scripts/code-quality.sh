@@ -114,6 +114,19 @@ run_validate() {
     return $failed
 }
 
+run_security() {
+    local failed=0
+
+    log_step "bandit"
+    if ! uv run bandit -c pyproject.toml -r install.py installer agentmaster ledger hooks scripts; then
+        log_error "Security scan failed"
+        failed=1
+    fi
+    log_step_end
+
+    return $failed
+}
+
 # Mutating: local use only — never wired into `all` or CI.
 run_format() {
     log_step "ruff format"
@@ -135,6 +148,7 @@ run_all() {
     run_typecheck || failed=1
     run_test || failed=1
     run_validate || failed=1
+    run_security || failed=1
 
     if [[ $failed -eq 1 ]]; then
         log_error "One or more quality checks failed"
@@ -150,10 +164,11 @@ case "${1:-all}" in
     typecheck) run_typecheck || exit 1;;
     test)      run_test || exit 1;;
     validate)  run_validate || exit 1;;
+    security)  run_security || exit 1;;
     format)    run_format;;
     all)       run_all;;
     *)
-        echo "Usage: $(basename "$0") [lint|shell|typecheck|test|validate|format|all]" >&2
+        echo "Usage: $(basename "$0") [lint|shell|typecheck|test|validate|security|format|all]" >&2
         exit 1
         ;;
 esac

@@ -5,13 +5,21 @@ on:
     branches: [main, develop]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.14'
-      - run: uv sync
+      - run: uv sync --locked
       - run: bash scripts/code-quality.sh all
