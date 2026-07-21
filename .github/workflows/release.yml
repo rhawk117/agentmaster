@@ -7,9 +7,14 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -23,17 +28,28 @@ jobs:
             echo "tag v$tag does not match pyproject version $version" >&2
             exit 1
           fi
-      - run: uv sync
+      - run: uv sync --locked
       - name: Quality gate
         run: bash scripts/code-quality.sh all
-      - name: Build install bundle
+      - name: Build release bundle and checksums
         run: |
-          git archive --format=zip -o "agentmaster-$GITHUB_REF_NAME.zip" HEAD \
-            install.py installer shared agents copilot skills hooks criteria \
-            scripts/telemetry_report.py README.md LICENSE pyproject.toml
+          uv run python scripts/release_bundle.py \
+            "agentmaster-$GITHUB_REF_NAME.zip" --checksums SHA256SUMS
+      - name: Verify checksums
+        run: sha256sum --check SHA256SUMS
+      - name: Smoke-test the extracted archive
+        run: |
+          mkdir extracted
+          unzip -q "agentmaster-$GITHUB_REF_NAME.zip" -d extracted
+          cd extracted
+          uv run --no-project python install.py --help
+          uv run --no-project python -m agentmaster ledger doctor --help
+          uv run --no-project python -m agentmaster ledger init \
+            --path "$RUNNER_TEMP/release-smoke-ledger.sqlite3"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "agentmaster-$GITHUB_REF_NAME.zip" \
+          gh release create "$GITHUB_REF_NAME" \
+            "agentmaster-$GITHUB_REF_NAME.zip" SHA256SUMS \
             --generate-notes --verify-tag

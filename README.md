@@ -252,13 +252,13 @@ permissively across CLI versions.
 One command verifies the repository, and CI runs exactly it:
 
 ```bash
-make check                          # ruff format+check, bashate, ty, compileall+pytest, parity validation
+make check                          # ruff format+check, bashate, ty, compileall+pytest, parity validation, bandit
 bash scripts/code-quality.sh all    # identical; use where make is absent
 ```
 
 `make help` lists every target, itself included; the rest are `check`,
 `lint`, `shell`, `typecheck`,
-`test`, `format`, `validate`, `sync`, `install`, `install-claude`,
+`test`, `format`, `validate`, `security`, `sync`, `install`, `install-claude`,
 `install-copilot`, `uninstall`, `telemetry`, and `clean-telemetry`.
 
 Worker agent prompts are generated: edit `shared/agents/<name>.md` and run
@@ -278,12 +278,19 @@ git tag v<version> && git push origin v<version>
 
 The `release.yml` workflow re-runs the full quality gate, rejects any tag
 whose `v<version>` does not equal the `pyproject.toml` version, builds the
-runtime bundle `agentmaster-<tag>.zip` (`install.py`, `installer/`, `shared/`,
-`agents/`, `copilot/`, `skills/`, `hooks/`, `criteria/`,
-`scripts/telemetry_report.py`, `README.md`, `LICENSE`, `pyproject.toml`; no
-tests or `.github/`), attaches it to a GitHub Release, and auto-generates the
-notes. A failed gate means no release: delete the tag, fix the failure, and
-re-tag.
+runtime bundle `agentmaster-<tag>.zip` from the single source of truth in
+`scripts/release_bundle.py` (`install.py`, `installer/`, `agentmaster/`,
+`ledger/`, `shared/`, `agents/`, `copilot/`, `skills/`, `hooks/`,
+`criteria/`, `scripts/telemetry_report.py`, `README.md`, `LICENSE`,
+`pyproject.toml`; no tests, `.github/`, or local ledger/session state, since
+`git archive` only ever includes tracked files), generates a `SHA256SUMS`
+file, extracts the archive and smoke-tests `install.py --help`,
+`agentmaster ledger doctor --help`, and a temporary `agentmaster ledger init`
+against it under Python 3.14, then attaches the zip and checksums to a
+GitHub Release and auto-generates the notes. A failed gate means no
+release was ever published: delete the tag, fix the failure, and re-tag.
+Once a release **has** been published, its tag is immutable — a bad release
+gets a new patch version, never a retagged `v<version>`.
 
 ## Hardening: how each former weakness is now addressed
 

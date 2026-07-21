@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check lint shell typecheck test format validate sync \
+.PHONY: help check lint shell typecheck test format validate security sync \
 	install install-claude install-copilot uninstall telemetry clean-telemetry
 
 help:  ## List available targets
@@ -30,6 +30,9 @@ format:  ## Mutating: ruff format + ruff check --fix (local only)
 
 validate:  ## Installer parity + criteria drift validation
 	bash scripts/code-quality.sh validate
+
+security:  ## bandit security scan
+	bash scripts/code-quality.sh security
 
 sync:  ## Regenerate worker agents from shared/agents/
 	uv run python install.py sync
