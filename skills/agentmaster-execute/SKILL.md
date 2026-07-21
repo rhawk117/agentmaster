@@ -137,6 +137,17 @@ structure quality (SOLID, YAGNI, DRY); testability; flexibility to change;
 security — and it owns the fix loop: fix tasks it emits go to implementers
 under its control, not yours.
 
+When the plan's delivery mode requires a pushed PR (SPEC.md §9.2), do not
+report completion once CI is green: dispatch `agentmaster-review
+--deterministic <head-sha>` for an independent verdict tied to that exact
+head, record it, and only report done once the review/merge gate resolves —
+GOOD moves to merge, NEEDS_FIXES returns accepted findings to implementers.
+The `execute_stop` hook enforces this even if this phase's own bookkeeping
+is wrong: it blocks the session from ending while the run is
+ReviewRequired, Reviewing, FixesRequired, MergePending, or
+RetrospectivePending (SPEC.md §20.3), so an unresolved gate surfaces instead
+of silently completing.
+
 ## Output
 
 Return the execution report only: per-group results with verification

@@ -128,6 +128,7 @@ def test_fresh_install_writes_everything(tmp_path: Path, repo_root, statuses) ->
 
     hooks = (
         'dispatch_guard.py',
+        'execute_stop.py',
         'hooklib.py',
         'precompact_snapshot.py',
         'session_context.py',
@@ -146,6 +147,7 @@ def test_fresh_install_writes_everything(tmp_path: Path, repo_root, statuses) ->
         'PreToolUse',
         'PreCompact',
         'SessionStart',
+        'Stop',
     }
 
 

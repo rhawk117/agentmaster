@@ -587,14 +587,91 @@ CREATE TABLE EVALUATION_METRIC (
 
 CREATE INDEX idx_evaluation_metric_evaluation_id ON EVALUATION_METRIC(evaluation_id);
 
+-- --- delivery and review (§17.1, §20.2, §20.3, §23 Microtask 21) ------------
+-- Added together, in FK order: REVIEW's mandatory reference to
+-- DELIVERY_ATTEMPT would otherwise forward-reference a table that does not
+-- exist yet, and every ledger connection runs with `PRAGMA foreign_keys =
+-- ON` (ledger/connection.py), under which SQLite refuses to even prepare an
+-- INSERT/UPDATE against a table whose FK target does not exist -- not just a
+-- constraint violation, a "no such table" error. Microtask 22 (git
+-- publisher) owns all ingestion/CLI behavior for DELIVERY_ATTEMPT and
+-- CI_CHECK; only their schema lands here so REVIEW can reference them.
+
+-- DELIVERY_ATTEMPT: one push/PR attempt for a run's delivery (§17.1, §20.2).
+CREATE TABLE DELIVERY_ATTEMPT (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES RUN(id),
+    attempt_no INTEGER NOT NULL,
+    branch TEXT NOT NULL,
+    base_sha TEXT NOT NULL,
+    head_sha TEXT NOT NULL,
+    pr_number INTEGER,
+    pr_url TEXT,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE INDEX idx_delivery_attempt_run_id ON DELIVERY_ATTEMPT(run_id);
+
+-- CI_CHECK: one observed CI check result at a delivery attempt's head (§17.1).
+CREATE TABLE CI_CHECK (
+    id TEXT PRIMARY KEY,
+    delivery_attempt_id TEXT NOT NULL REFERENCES DELIVERY_ATTEMPT(id),
+    provider_check_id TEXT,
+    name TEXT NOT NULL,
+    head_sha TEXT NOT NULL,
+    status TEXT NOT NULL,
+    conclusion TEXT,
+    url TEXT,
+    observed_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_ci_check_delivery_attempt_id ON CI_CHECK(delivery_attempt_id);
+
+-- REVIEW: one independent reviewer verdict for a delivery attempt (§17.1, §20.3).
+-- `verdict` is the one column with a spec-enumerated closed set (§20.3's
+-- machine-readable schema: "GOOD | NEEDS_FIXES"), so it is the one CHECK
+-- here; REVIEW_FINDING's severity/state below are not spec-enumerated and
+-- stay unconstrained per §16.3. `summary_artifact_id` holds the reviewer's
+-- full immutable JSON result (schema_version, findings, evidence_gaps, and
+-- summary) as one content-addressed ARTIFACT: evidence_gaps has no ERD
+-- column or table of its own, so it travels with the rest of the raw result
+-- rather than being modeled relationally.
+CREATE TABLE REVIEW (
+    id TEXT PRIMARY KEY,
+    delivery_attempt_id TEXT NOT NULL REFERENCES DELIVERY_ATTEMPT(id),
+    reviewer_session_id TEXT NOT NULL REFERENCES AGENT_SESSION(id),
+    reviewed_sha TEXT NOT NULL,
+    verdict TEXT NOT NULL CHECK (verdict IN ('GOOD', 'NEEDS_FIXES')),
+    summary_artifact_id TEXT REFERENCES ARTIFACT(id),
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_review_delivery_attempt_id ON REVIEW(delivery_attempt_id);
+CREATE INDEX idx_review_reviewer_session_id ON REVIEW(reviewer_session_id);
+CREATE INDEX idx_review_summary_artifact_id ON REVIEW(summary_artifact_id);
+
+-- REVIEW_FINDING: one structured finding from a REVIEW (§17.1, §20.3).
+CREATE TABLE REVIEW_FINDING (
+    id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL REFERENCES REVIEW(id),
+    severity TEXT NOT NULL,
+    state TEXT NOT NULL,
+    criterion_id TEXT,
+    file_path TEXT,
+    line_no INTEGER,
+    summary TEXT NOT NULL,
+    evidence_id TEXT REFERENCES EVIDENCE(id)
+);
+
+CREATE INDEX idx_review_finding_review_id ON REVIEW_FINDING(review_id);
+CREATE INDEX idx_review_finding_evidence_id ON REVIEW_FINDING(evidence_id);
+
 -- --- stable read-only views (SPEC.md §18) -----------------------------------
 -- SQLite rejects writes against a view with no `INSTEAD OF` trigger (none are
 -- defined here), which is what makes these safe to expose on a query-only
--- connection. `v_delivery_current_head` and `v_unresolved_review_findings`
--- reference DELIVERY_ATTEMPT, CI_CHECK, REVIEW, and REVIEW_FINDING, which do
--- not exist yet (§17.1); SQLite does not validate a view's table references
--- until it is queried, so these `CREATE VIEW` statements succeed now and
--- those two views only become queryable once those tables are added.
+-- connection.
 
 CREATE VIEW v_run_summary AS
 SELECT r.id AS run_id, r.project_id, r.user_session_id, r.delivery_mode,

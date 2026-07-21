@@ -318,6 +318,7 @@ def test_malformed_json_exits_zero_everywhere(run_hook):
         'session_context',
         'cost_boundary',
         'dispatch_guard',
+        'execute_stop',
         'copilot_telemetry_pre',
         'copilot_telemetry_post',
     )

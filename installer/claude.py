@@ -170,6 +170,7 @@ def _hook_events(home: Path) -> dict[str, list[dict]]:
         ],
         'PreCompact': [{'hooks': [cmd('precompact_snapshot.py')]}],
         'SessionStart': [{'hooks': [cmd('session_context.py')]}],
+        'Stop': [{'hooks': [cmd('execute_stop.py')]}],
     }
 
 
