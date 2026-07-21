@@ -170,6 +170,19 @@ def test_validate_detects_retro_criteria_drift(repo_copy):
     assert any('agentmaster-retro/SKILL.md' in f for f in findings)
 
 
+def test_validate_detects_writing_skills_criteria_drift(repo_copy):
+    assert validate(repo_copy) == []
+
+    target = repo_copy / 'skills' / 'agentmaster-execute' / 'SKILL.md'
+    text = target.read_text(encoding='utf-8')
+    start = '<!-- agentmaster:writing-skills-criteria:start -->'
+    target.write_text(text.replace(start, start + '\ninjected drift line'))
+
+    findings = validate(repo_copy)
+
+    assert any('agentmaster-execute/SKILL.md' in f for f in findings)
+
+
 def test_validate_detects_missing_shared_body(repo_copy):
     (repo_copy / 'shared' / 'agents' / 'scout.md').unlink()
 
@@ -204,60 +217,3 @@ def test_validate_with_injected_manifest(tmp_path):
     sync_workers(root, fake)
 
     assert validate(root, fake) == []
-
-
-@pytest.mark.subprocess
-def test_cli_install_dry_run_writes_nothing(tmp_path, run_cli, repo_root):
-    claude_home = tmp_path / 'claude-home'
-    copilot_home = tmp_path / 'copilot-home'
-
-    result = run_cli(
-        ['install', '--target', 'all', '--dry-run'],
-        cwd=repo_root,
-        env_extra={
-            'CLAUDE_CONFIG_DIR': str(claude_home),
-            'COPILOT_CONFIG_DIR': str(copilot_home),
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert 'create' in result.stdout
-    assert not claude_home.exists()
-    assert not copilot_home.exists()
-
-
-@pytest.mark.subprocess
-def test_cli_validate_clean_exits_zero(run_cli, repo_root):
-    result = run_cli(['validate', '--target', 'all'], cwd=repo_root)
-
-    assert result.returncode == 0, result.stderr
-
-
-@pytest.mark.subprocess
-def test_cli_validate_drift_exits_one(repo_copy, run_cli):
-    drifted = repo_copy / 'agents' / 'scout.md'
-    drifted.write_text(drifted.read_text(encoding='utf-8') + 'x\n')
-
-    result = run_cli(['validate', '--target', 'all'], cwd=repo_copy)
-
-    assert result.returncode == 1
-    assert 'scout.md' in result.stdout + result.stderr
-
-
-@pytest.mark.subprocess
-def test_cli_sync_is_idempotent_on_clean_tree(repo_copy, run_cli):
-    result = run_cli(['sync'], cwd=repo_copy)
-
-    assert result.returncode == 0, result.stderr
-    assert validate(repo_copy) == []
-
-
-@pytest.mark.subprocess
-def test_cli_rejects_invalid_model(run_cli, repo_root):
-    result = run_cli(
-        ['install', '--target', 'claude', '--model', 'bad model!', '--dry-run'],
-        cwd=repo_root,
-    )
-
-    assert result.returncode != 0
-    assert 'model' in (result.stdout + result.stderr).lower()

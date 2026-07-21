@@ -53,8 +53,9 @@ a report headed `BLOCKED:` naming exactly what a human must decide.
   Serial dispatch of independent work wastes wall-clock time and keeps your
   expensive context open longer than it needs to be.
 
-Phase marker: before anything else, write the single word `retro` to
-`.agentmaster/.phase` — the one workspace write you make yourself; the
+Phase marker: before anything else, write the single word `retro` to the
+session's `.phase` file at the path SessionStart announced (fallback:
+`.agentmaster/.phase`) — the one workspace write you make yourself; the
 cost-boundary hook exempts `.agentmaster/`. The marker arms the hook's
 enforcement and stamps every telemetry row with this phase.
 
@@ -176,8 +177,9 @@ narrate decisions, not tool mechanics.
   notice where the platform reports them. Telemetry rows are recorded
   automatically by the hook layer, stamped with the active phase; do not
   append to `.agentmaster/telemetry.md`.
-- Phase teardown: clear `.agentmaster/.phase` by overwriting it with empty
-  content, retiring the cost boundary for this phase.
+- Phase teardown: clear that same `.phase` marker (session path from
+  SessionStart, or `.agentmaster/.phase` as fallback) by overwriting it with
+  empty content, retiring the cost boundary for this phase.
 - Phase boundary: this phase ends with this output. Remind the user the
   session may still be on this skill's elevated model (`/model` to check; a
   fresh session drops back), and do not begin another phase in this turn.

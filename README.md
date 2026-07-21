@@ -32,15 +32,42 @@ python install.py uninstall --target all   # clean removal, hook entries strippe
 ```
 
 Python 3.14+ is the only requirement. The installer is stdlib-only, so there
-are no dependencies to install. Explicit flags always win; when a flag is
-absent and the session is a TTY the installer prompts for the model
-choice, and a non-TTY session takes the defaults silently
-(`--model` overrides the model pin either way). Every file it would overwrite
-is copied first into a timestamped `agentmaster-backup-<timestamp>/` under the
-config home, and the five hook events it merges into `settings.json` are
-merged idempotently, never clobbering hooks you already have. The
-superpowers-plugin check prints the exact install commands when the plugin is
-missing.
+are no dependencies to install. Every role — coordinator, orchestrator,
+implementer, reviewer — resolves independently: `--claude-model` /
+`--copilot-model` sets the coordinator, and `--claude-orchestrator-model`,
+`--claude-implementer-model`, `--claude-review-model` (each with a matching
+`-effort low|medium|high|xhigh|max` flag), and `--copilot-implementer-model`
+target one role. Explicit flags always win; when a flag is absent and the
+session is a TTY the installer prompts per role, and a non-TTY session (or
+`--no-input`) takes the recommended default silently. Copilot has no
+orchestrator/reviewer roles and never gets an effort field. Every file it
+would overwrite is copied first into a timestamped
+`agentmaster-backup-<timestamp>/` under the config home, and the five hook
+events it merges into `settings.json` are merged idempotently, never
+clobbering hooks you already have. The superpowers-plugin check prints the
+exact install commands when the plugin is missing.
+
+The ledger (`~/.agentmaster/ledger.sqlite3` by default) and its artifact
+store are enabled by default with structured metadata; `--ledger-path` and
+`--artifact-dir` relocate them, `--no-ledger` disables both (`--no-ledger`
+and `--ledger-path` together are rejected), and `--delivery-mode
+local|commit|pull-request|merge` sets how a run may publish its changes.
+Dry-run and a disabled ledger never create a directory, database, or
+artifact.
+
+`--auto-compact-percent 1-100` (Claude only) sets
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`; `--clear-auto-compact-override` removes
+an Agentmaster-managed override instead (the two are mutually exclusive). An
+interactive install without either flag offers preserving current/default
+behavior, setting 50% (recommended for long Agentmaster execution
+sessions), a custom percentage, or clearing an existing override; a
+noninteractive install without either flag leaves current behavior
+untouched. This affects the main Claude conversation and all subagents.
+Earlier compaction reduces working-context pressure but may discard detail
+and disrupt cache continuity; it is not a per-implementer control. On
+reinstall the original pre-Agentmaster value is preserved, and clearing or
+uninstalling restores it only while Agentmaster still owns the current
+value.
 
 After a Claude Code install, restart once if `~/.claude/skills/` or
 `~/.claude/agents/` were newly created. Keep `CLAUDE_CODE_SUBAGENT_MODEL`
@@ -151,13 +178,22 @@ worker actually ran on, so pin effectiveness is verifiable from data.
 
 The hook layer owns all telemetry rows: it appends
 `<phase>,<agent>,<model>,<tokens>,<duration_ms>` lines to
-`.agentmaster/telemetry.md`. The phase comes from the `.agentmaster/.phase`
+`.agentmaster/sessions/<harness-session-id>/telemetry.md` (falling back to the
+legacy root `.agentmaster/telemetry.md` for rows written before session
+scoping), so two sessions in one checkout never clobber each other's
+telemetry. The phase comes from the session's `.phase`
 marker the coordinator skills set and clear at phase boundaries (`hook` when
 none is active), the model and tokens from the payload or the subagent
 transcript where the platform reports them, and the wall-clock duration from
-a start/stop timestamp pair. The skills never hand-append rows. Read the
-running totals per agent, phase, and model with `make telemetry` (or `uv run
-python scripts/telemetry_report.py`). Prune with `make clean-telemetry`: it
+a start/stop timestamp pair. `PreCompact` rows use the agent column to
+distinguish who compacted: `precompact:main` for the primary session,
+`precompact:implementer` and `precompact:<subagent>` otherwise, with the
+pre-compaction token count in the tokens column when the provider supplies
+it. The skills never hand-append rows. Read the
+running totals per agent, phase, and model with `make telemetry
+SESSION=.agentmaster/sessions/<id>` (or `uv run python
+scripts/telemetry_report.py <session-dir>/telemetry.md` directly). Prune with
+`make clean-telemetry SESSION=.agentmaster/sessions/<id>`: it
 keeps the newest 500 lines and 5 compaction snapshots and drops `.starts`
 orphans and a stale `.phase` marker older than a day (`--keep-lines`,
 `--keep-snapshots`, and `--dry-run` adjust that). Nothing prunes
@@ -172,7 +208,8 @@ choice.
 analyze-fix-verify loop over the suite's own accumulated artifacts, rather
 than over a single task. Its corpus is fixed by convention: `.transcripts/`
 (prose only — code files inside it are never read), root-level run artifacts
-(run transcripts, generated docs), `.agentmaster/telemetry.md`, and every
+(run transcripts, generated docs), every session's
+`.agentmaster/sessions/<id>/telemetry.md`, and every
 prior `.agentmaster/retro/*.md`. A `scout` inventories the corpus,
 `code-analyst` grades each artifact against a rubric in
 `criteria/retro-criteria.md` — marking each finding
@@ -197,8 +234,10 @@ worker dispatch into the telemetry file described above, so telemetry no
 longer depends on the orchestrator remembering; a `PreToolUse` guard on the
 `Agent`/`Task` tools blocks all dispatch while `CLAUDE_CODE_SUBAGENT_MODEL`
 is exported, since that variable silently defeats the tiering; `PreCompact`
-snapshots `.agentmaster/` into `.agentmaster/compaction-snapshots/` before
-compaction; and `SessionStart` injects a re-hydration pointer whenever a
+snapshots `.agentmaster/` into a fresh, uniquely named directory under
+`.agentmaster/compaction-snapshots/` before every compaction, so same-second
+or overlapping compactions never merge or overwrite each other's history;
+and `SessionStart` injects a re-hydration pointer whenever a
 project carries agentmaster artifacts. The coordinator skills additionally
 carry a frontmatter `PreToolUse` cost-boundary hook, armed only while
 `.agentmaster/.phase` names a phase. All scripts parse hook JSON
@@ -208,18 +247,26 @@ permissively across CLI versions.
 > Set `AGENTMASTER_HOOK_DEBUG=1` to dump raw hook payloads to
 > `.agentmaster/hook-debug.jsonl` for one-run verification.
 
+## Migrating from v1
+
+Upgrading an existing v1 install? See [`MIGRATION.md`](MIGRATION.md) for the
+full v1-to-v2 guide: the per-role model/effort flags that replaced a single
+`--model`, the SQLite ledger that replaced the markdown ledgers, config
+precedence, backup/restore, non-destructive legacy-artifact import, delivery
+modes, and worked examples for common scenarios.
+
 ## Development
 
 One command verifies the repository, and CI runs exactly it:
 
 ```bash
-make check                          # ruff format+check, bashate, ty, compileall+pytest, parity validation
+make check                          # ruff format+check, bashate, ty, compileall+pytest, parity validation, bandit
 bash scripts/code-quality.sh all    # identical; use where make is absent
 ```
 
 `make help` lists every target, itself included; the rest are `check`,
 `lint`, `shell`, `typecheck`,
-`test`, `format`, `validate`, `sync`, `install`, `install-claude`,
+`test`, `format`, `validate`, `security`, `sync`, `install`, `install-claude`,
 `install-copilot`, `uninstall`, `telemetry`, and `clean-telemetry`.
 
 Worker agent prompts are generated: edit `shared/agents/<name>.md` and run
@@ -239,12 +286,19 @@ git tag v<version> && git push origin v<version>
 
 The `release.yml` workflow re-runs the full quality gate, rejects any tag
 whose `v<version>` does not equal the `pyproject.toml` version, builds the
-runtime bundle `agentmaster-<tag>.zip` (`install.py`, `installer/`, `shared/`,
-`agents/`, `copilot/`, `skills/`, `hooks/`, `criteria/`,
-`scripts/telemetry_report.py`, `README.md`, `LICENSE`, `pyproject.toml`; no
-tests or `.github/`), attaches it to a GitHub Release, and auto-generates the
-notes. A failed gate means no release: delete the tag, fix the failure, and
-re-tag.
+runtime bundle `agentmaster-<tag>.zip` from the single source of truth in
+`scripts/release_bundle.py` (`install.py`, `installer/`, `agentmaster/`,
+`ledger/`, `shared/`, `agents/`, `copilot/`, `skills/`, `hooks/`,
+`criteria/`, `scripts/telemetry_report.py`, `README.md`, `LICENSE`,
+`pyproject.toml`; no tests, `.github/`, or local ledger/session state, since
+`git archive` only ever includes tracked files), generates a `SHA256SUMS`
+file, extracts the archive and smoke-tests `install.py --help`,
+`agentmaster ledger doctor --help`, and a temporary `agentmaster ledger init`
+against it under Python 3.14, then attaches the zip and checksums to a
+GitHub Release and auto-generates the notes. A failed gate means no
+release was ever published: delete the tag, fix the failure, and re-tag.
+Once a release **has** been published, its tag is immutable — a bad release
+gets a new patch version, never a retagged `v<version>`.
 
 ## Hardening: how each former weakness is now addressed
 
@@ -319,7 +373,7 @@ gap parallel mode leaves; a proportionality gate (and `--lite`) keeps the
 recommending no pipeline at all for trivial changes; serialized
 verifications batch into one dispatch; telemetry follows a fixed
 `phase,agent,model,tokens,duration_ms` schema summarized by
-`scripts/telemetry_report.py`; and `python install.py validate --target all`
+`scripts/telemetry_report.py`; and `python install.py validate`
 fails CI on criteria or generated-file drift.
 
 ### Further reading

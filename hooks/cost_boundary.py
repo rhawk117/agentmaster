@@ -32,7 +32,7 @@ def _is_exempt(target: str, root: Path) -> bool:
     """True when target lies outside the workspace or under .agentmaster/."""
     try:
         resolved = (root / target).resolve()
-    except Exception:
+    except OSError, RuntimeError:
         return False
     if not resolved.is_relative_to(root):
         return True
@@ -42,7 +42,7 @@ def _is_exempt(target: str, root: Path) -> bool:
 def main() -> int:
     payload = hooklib.read_payload()
     root = hooklib.workspace(payload).resolve()
-    phase = hooklib.current_phase(root / '.agentmaster')
+    phase = hooklib.current_phase(payload)
     if not phase:
         return 0
     if hooklib.tool_name(payload) in _PATH_TOOLS:

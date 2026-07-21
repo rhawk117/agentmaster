@@ -1,15 +1,16 @@
 """Summarize agentmaster telemetry.
 
-Reads `.agentmaster/telemetry.md` (or the path given as the first argument),
-whose lines look like `<phase>,<agent>,<model>,<tokens>,<duration_ms>` with
-blank fields allowed (`hook` in the phase column when no phase was active),
-and prints invocation counts, token totals, and wall-clock totals per agent,
-per phase, and per model. Exits 1 when the telemetry file does not exist.
-With `--prune`, trims old telemetry lines, compaction snapshots, and stale
-session-start and phase markers.
+Reads a telemetry.md file (the path given as the first argument, defaulting
+to the legacy root `.agentmaster/telemetry.md`; session-scoped runs write to
+`.agentmaster/sessions/<harness-session-id>/telemetry.md` instead, so pass
+that path explicitly for a given session), whose lines look like
+`<phase>,<agent>,<model>,<tokens>,<duration_ms>` with blank fields allowed
+(`hook` in the phase column when no phase was active), and prints invocation
+counts, token totals, and wall-clock totals per agent, per phase, and per
+model. Exits 1 when the telemetry file does not exist. With `--prune`, trims
+old telemetry lines, compaction snapshots, and stale session-start and phase
+markers in that same directory.
 """
-
-from __future__ import annotations
 
 import argparse
 import shutil
@@ -130,7 +131,10 @@ def main(argv: list[str] | None = None) -> int:
         nargs='?',
         type=Path,
         default=Path('.agentmaster') / 'telemetry.md',
-        help='telemetry file (default: .agentmaster/telemetry.md)',
+        help=(
+            'telemetry file (default: legacy .agentmaster/telemetry.md; pass '
+            '.agentmaster/sessions/<id>/telemetry.md for a session-scoped run)'
+        ),
     )
     parser.add_argument(
         '--prune', action='store_true', help='prune old telemetry artifacts'

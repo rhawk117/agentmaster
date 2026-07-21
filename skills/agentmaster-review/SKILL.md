@@ -3,6 +3,7 @@ name: agentmaster-review
 description: Cost-tiered adversarial code review. Use after implementer subagents complete a agentmaster-plan plan (the plan's review gate invokes this), or whenever the user wants a rigorous review of a diff, branch, PR, or recent changes. Works from the assumption that the code is bad — poorly implemented, doesn't scale, violates YAGNI, SOLID, or DRY, is hard to test, badly structured, or insecure — and makes it prove otherwise with evidence. Keeps frontier reasoning for adjudication only: dispatches scout (haiku) and code-analyst (sonnet) for all evidence, then approves or emits fix tasks and dispatches implementers. Trigger on "review the changes", "review this diff", "review this branch", or as the final task of an executed plan.
 argument-hint: "[ref range, branch, or plan path — defaults to changes vs the default-branch merge-base]"
 model: opus  # resolves to Claude Opus 4.8; org disables fable — swap back to `fable` if that changes
+effort: high
 hooks:
   PreToolUse:
     - matcher: "Read|Grep|Glob|Bash|WebFetch|WebSearch|Edit|Write|NotebookEdit"
@@ -58,8 +59,9 @@ CLI versions.
   skills, ask the user questions with AskUserQuestion, dispatch implementers
   for accepted fixes, and produce the review report. Nothing else.
 
-Phase marker: before anything else, write the single word `review` to
-`.agentmaster/.phase` — the one workspace write you make yourself; the
+Phase marker: before anything else, write the single word `review` to the
+session's `.phase` file at the path SessionStart announced (fallback:
+`.agentmaster/.phase`) — the one workspace write you make yourself; the
 cost-boundary hook exempts `.agentmaster/`. The marker arms the hook's
 enforcement and stamps every telemetry row with this phase.
 
@@ -154,6 +156,39 @@ this context is ever compacted.
   after the second, surface anything still open to the user with your
   recommendation rather than looping again.
 
+## Deterministic delivery-gate mode
+
+When invoked with `--deterministic <reviewed-sha>` (the orchestrator's
+delivery pipeline, after CI is green at that exact head — SPEC.md §20.3),
+this is an independent review of a specific commit, not the interactive loop
+above: dispatch a fresh session, never one that touched the implementation,
+and never accept a self-reported "review complete" claim without running
+this pipeline yourself. In addition to the normal report, emit exactly one
+machine-readable JSON object as your final output:
+
+```json
+{
+  "schema_version": 1,
+  "reviewed_sha": "<40-hex commit — must equal the requested head>",
+  "verdict": "GOOD | NEEDS_FIXES",
+  "findings": [
+    {"severity": "...", "summary": "...", "criterion_id": null,
+     "file_path": null, "line_no": null, "evidence_id": null}
+  ],
+  "evidence_gaps": ["..."],
+  "summary": "..."
+}
+```
+
+GOOD requires `reviewed_sha` to equal the exact requested head; never emit
+GOOD for a different commit, and never emit a result missing any of the
+fields above — a malformed result is a failed review, never GOOD. The
+orchestrator records this object via `agentmaster delivery record-review`
+(wraps `ledger.review_gate.apply_review_result`, which applies the verdict):
+out-of-scope concerns you notice belong in `summary` prose, not in `findings` — findings
+are exactly the work items the orchestrator will convert into accepted task
+work on NEEDS_FIXES.
+
 ## Output
 
 Return the review report only: verdict, adjudicated findings with severity,
@@ -166,8 +201,9 @@ narrate rulings, not tool mechanics.
   automatically by the hook layer, stamped with the active phase; do not
   append to `.agentmaster/telemetry.md`. Tuning `maxTurns` and model pins is
   done from this data, not by feel.
-- Phase teardown: clear `.agentmaster/.phase` by overwriting it with empty
-  content, retiring the cost boundary for this phase.
+- Phase teardown: clear that same `.phase` marker (session path from
+  SessionStart, or `.agentmaster/.phase` as fallback) by overwriting it with
+  empty content, retiring the cost boundary for this phase.
 - Phase boundary: this phase ends with this output. Remind the user the
   session may still be on this skill's elevated model (`/model` to check; a
   fresh session drops back), and do not begin the next phase in this turn.

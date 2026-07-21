@@ -66,8 +66,9 @@ dispatch one `implementer` with the single task directly and close with
   Serial dispatch of independent work wastes wall-clock time and keeps your
   expensive context open longer than it needs to be.
 
-Phase marker: before anything else, write the single word `plan` to
-`.agentmaster/.phase` — the one workspace write you make yourself; the
+Phase marker: before anything else, write the single word `plan` to the
+session's `.phase` file at the path SessionStart announced (fallback:
+`.agentmaster/.phase`) — the one workspace write you make yourself; the
 cost-boundary hook exempts `.agentmaster/`. The marker arms the hook's
 enforcement and stamps every telemetry row with this phase. If the write is
 blocked (plan mode forbids workspace writes), continue without it.
@@ -292,9 +293,10 @@ not formalized yet.
   automatically by the hook layer, stamped with the active phase; do not
   append to `.agentmaster/telemetry.md`. Tuning `maxTurns` and model pins is
   done from this data, not by feel.
-- Phase teardown: clear `.agentmaster/.phase` by overwriting it with empty
-  content, retiring the cost boundary for this phase. Skip if the marker was
-  never written.
+- Phase teardown: clear that same `.phase` marker (session path from
+  SessionStart, or `.agentmaster/.phase` as fallback) by overwriting it with
+  empty content, retiring the cost boundary for this phase. Skip if the
+  marker was never written.
 - Phase boundary: this phase ends with this output. Remind the user the
   session may still be on this skill's elevated model (`/model` to check; a
   fresh session drops back), and do not begin the next phase in this turn.

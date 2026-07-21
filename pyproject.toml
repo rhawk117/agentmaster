@@ -1,6 +1,6 @@
 [project]
 name = "agentmaster"
-version = "1.1.1"
+version = "2.0.0"
 description = "On strong head with weaker hands"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -8,16 +8,37 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "bandit>=1.9.4",
     "bashate>=2.1.1",
     "pytest>=8.3",
     "ruff>=0.15.22",
     "ty>=0.0.61",
 ]
 
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+# Every skip below is already reviewed and enforced per-line by ruff's S-rule
+# noqa comments (flake8-bandit), so re-flagging them here would just be
+# duplicate, already-adjudicated noise rather than a new finding:
+# B101/B105/B106 mirror ruff's repo-wide S101/S105/S106 ignores (asserts as
+#   invariants; token/state-machine strings bandit misreads as passwords);
+# B404/B603/B607 fire on every list-argv, shell=False subprocess call, which
+#   is the safe pattern this repo already uses exclusively (see
+#   ledger/git_publisher.py's argv-list subprocess calls);
+# B311 is a single non-cryptographic jitter use in ledger/transactions.py;
+# B608 is hardcoded-SQL detection on the four ledger queries that already
+#   carry an explicit `# noqa: S608` and a comment proving no user input
+#   reaches the interpolated identifier.
+skips = ["B101", "B105", "B106", "B311", "B404", "B603", "B607", "B608"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "--strict-markers"
+addopts = ["--strict-config", "--strict-markers", "-ra"]
+xfail_strict = true
+filterwarnings = ["error"]
 markers = [
-    "subprocess: test spawns Python subprocesses (slower; deselect with -m 'not subprocess')",
+    "subprocess: spawns a local child process",
+    "integration: crosses a CLI and installer/filesystem boundary",
+    "sqlite: exercises a real SQLite database",
 ]

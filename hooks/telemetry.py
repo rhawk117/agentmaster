@@ -35,21 +35,42 @@ def _transcript_stats(transcript_path: str, aid: str) -> tuple[str | int, str]:
     return '', ''
 
 
-def _consume_start(am: Path, aid: str) -> str:
-    """Return the elapsed duration in ms and delete the recorded start."""
-    st = am / '.starts' / aid
+def _consume_start(sdir: Path, legacy_dir: Path, aid: str) -> str:
+    """Return the elapsed duration in ms and delete the recorded start.
+
+    Checks the session-scoped .starts/ first, falling back to the legacy
+    root .agentmaster/.starts/ for timestamps recorded before session
+    scoping.
+    """
+    for base in (sdir, legacy_dir):
+        st = base / '.starts' / aid
+        try:
+            duration = str(int((time.time() - float(st.read_text())) * 1000))
+        except OSError, ValueError:
+            continue
+        with contextlib.suppress(Exception):
+            st.unlink()
+        return duration
+    return ''
+
+
+def _to_int(value: str | int) -> int | None:
+    """Return `value` as a non-negative int, or `None` when absent/unparseable.
+
+    Never fabricates a token/duration value (SPEC.md §16.3): an empty
+    string or a value that isn't a real non-negative integer becomes NULL
+    rather than 0 or a guess.
+    """
     try:
-        duration = str(int((time.time() - float(st.read_text())) * 1000))
-    except Exception:
-        return ''
-    with contextlib.suppress(Exception):
-        st.unlink()
-    return duration
+        parsed = int(value)
+    except TypeError, ValueError:
+        return None
+    return parsed if parsed >= 0 else None
 
 
 def main() -> int:
     payload = hooklib.read_payload()
-    am = hooklib.agentmaster_dir(payload)
+    sdir = hooklib.session_dir(payload)
     hooklib.debug_dump(payload)
     agent = payload.get('agent_type') or payload.get('agent_name') or 'unknown'
     aid = payload.get('agent_id') or ''
@@ -64,8 +85,22 @@ def main() -> int:
         if tokens == '':
             tokens = t_tokens
         model = model or t_model
-    duration_ms = _consume_start(am, aid) if aid else ''
+    duration_ms = (
+        _consume_start(sdir, hooklib.agentmaster_dir(payload), aid) if aid else ''
+    )
     hooklib.append_telemetry(payload, agent, tokens, duration_ms, model)
+    hooklib.spool_event(
+        payload,
+        {
+            'kind': 'agent_session',
+            'cwd': str(hooklib.workspace(payload)),
+            'agent_id': aid,
+            'role': agent,
+            'model': model,
+            'total_tokens': _to_int(tokens),
+            'duration_ms': _to_int(duration_ms),
+        },
+    )
     return 0
 
 

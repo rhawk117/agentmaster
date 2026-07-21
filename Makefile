@@ -3,7 +3,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check lint shell typecheck test format validate sync \
+.PHONY: help check lint shell typecheck test format validate security sync \
 	install install-claude install-copilot uninstall telemetry clean-telemetry
 
 help:  ## List available targets
@@ -31,6 +31,9 @@ format:  ## Mutating: ruff format + ruff check --fix (local only)
 validate:  ## Installer parity + criteria drift validation
 	bash scripts/code-quality.sh validate
 
+security:  ## bandit security scan
+	bash scripts/code-quality.sh security
+
 sync:  ## Regenerate worker agents from shared/agents/
 	uv run python install.py sync
 
@@ -46,8 +49,8 @@ install-copilot:  ## Install the GitHub Copilot target
 uninstall:  ## Uninstall both targets
 	uv run python install.py uninstall --target all
 
-telemetry:  ## Summarize .agentmaster/telemetry.md
-	uv run python scripts/telemetry_report.py
+telemetry:  ## Summarize a session's telemetry.md (pass SESSION=.agentmaster/sessions/<id>/telemetry.md)
+	uv run python scripts/telemetry_report.py $(SESSION)
 
-clean-telemetry:  ## Prune telemetry, snapshots, and stale starts
-	uv run python scripts/telemetry_report.py --prune
+clean-telemetry:  ## Prune a session's telemetry, snapshots, and stale starts (pass SESSION=.agentmaster/sessions/<id>)
+	uv run python scripts/telemetry_report.py --prune $(if $(SESSION),$(SESSION)/telemetry.md,)

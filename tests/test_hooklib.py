@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -38,14 +39,18 @@ def test_read_payload_valid(monkeypatch):
 def test_append_telemetry_format(tmp_path):
     payload = {'cwd': str(tmp_path)}
     hooklib.append_telemetry(payload, 'scout', 123, 456)
-    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    line = (
+        tmp_path / '.agentmaster' / 'sessions' / 'default' / 'telemetry.md'
+    ).read_text()
     assert line == 'hook,scout,,123,456\n'
 
 
 def test_append_telemetry_blank_defaults(tmp_path):
     payload = {'cwd': str(tmp_path)}
     hooklib.append_telemetry(payload, 'precompact')
-    line = (tmp_path / '.agentmaster' / 'telemetry.md').read_text()
+    line = (
+        tmp_path / '.agentmaster' / 'sessions' / 'default' / 'telemetry.md'
+    ).read_text()
     assert line == 'hook,precompact,,,\n'
 
 
@@ -55,18 +60,41 @@ def test_append_telemetry_stamps_active_phase(tmp_path):
     am.mkdir()
     (am / '.phase').write_text('review\n')
     hooklib.append_telemetry(payload, 'scout', 1, 2, 'sonnet')
-    line = (am / 'telemetry.md').read_text()
+    line = (am / 'sessions' / 'default' / 'telemetry.md').read_text()
     assert line == 'review,scout,sonnet,1,2\n'
 
 
 def test_current_phase_reads_strips_and_degrades(tmp_path):
-    am = tmp_path / '.agentmaster'
-    am.mkdir()
-    (am / '.phase').write_text('plan\n')
-    assert hooklib.current_phase(am) == 'plan'
-    (am / '.phase').write_text('')
-    assert hooklib.current_phase(am) == ''
-    assert hooklib.current_phase(tmp_path / 'missing') == ''
+    payload = {'cwd': str(tmp_path)}
+    sdir = hooklib.session_dir(payload)
+    (sdir / '.phase').write_text('plan\n')
+    assert hooklib.current_phase(payload) == 'plan'
+    (sdir / '.phase').write_text('')
+    assert hooklib.current_phase(payload) == ''
+
+
+def test_current_phase_falls_back_to_legacy_root(tmp_path):
+    payload = {'cwd': str(tmp_path)}
+    am = hooklib.agentmaster_dir(payload)
+    (am / '.phase').write_text('review\n')
+    assert hooklib.current_phase(payload) == 'review'
+
+
+def test_session_id_sanitizes_separators_and_dots_only():
+    assert hooklib.session_id({'session_id': 'abc/def'}) == 'abc_def'
+    assert hooklib.session_id({'session_id': 'abc\\def'}) == 'abc_def'
+    assert hooklib.session_id({'session_id': '.'}) == 'default'
+    assert hooklib.session_id({'session_id': '..'}) == 'default'
+    assert hooklib.session_id({'session_id': ''}) == 'default'
+    assert hooklib.session_id({}) == 'default'
+    assert hooklib.session_id({'session_id': 'sess-1'}) == 'sess-1'
+
+
+def test_session_dir_is_scoped_and_created(tmp_path):
+    payload = {'cwd': str(tmp_path), 'session_id': 'abc'}
+    sdir = hooklib.session_dir(payload)
+    assert sdir == tmp_path / '.agentmaster' / 'sessions' / 'abc'
+    assert sdir.is_dir()
 
 
 def test_tool_name_camel_and_snake():
@@ -95,3 +123,96 @@ def test_read_payload_non_dict_json_returns_empty(monkeypatch):
     for raw in ('[1, 2]', '"scout"', '42', 'null'):
         monkeypatch.setattr(sys, 'stdin', io.StringIO(raw))
         assert hooklib.read_payload() == {}
+
+
+def test_compaction_context_defaults_when_payload_bare():
+    ctx = hooklib.compaction_context({})
+    assert ctx.agent_type == 'main'
+    assert ctx.trigger == ''
+    assert ctx.token_count == ''
+    assert ctx.session_id == ''
+
+
+def test_compaction_context_distinguishes_implementer():
+    ctx = hooklib.compaction_context({'agent_type': 'implementer'})
+    assert ctx.agent_type == 'implementer'
+
+
+def test_compaction_context_distinguishes_other_subagent():
+    ctx = hooklib.compaction_context({'agent_name': 'scout'})
+    assert ctx.agent_type == 'scout'
+
+
+def test_compaction_context_extracts_trigger_and_token_count():
+    ctx = hooklib.compaction_context({'trigger': 'auto', 'token_count': 9000})
+    assert ctx.trigger == 'auto'
+    assert ctx.token_count == '9000'
+
+
+def test_compaction_context_extracts_token_count_alt_key():
+    ctx = hooklib.compaction_context({'pre_tokens': 111})
+    assert ctx.token_count == '111'
+
+
+def test_compaction_context_extracts_session_identifier():
+    ctx = hooklib.compaction_context({'session_id': 'sess-1'})
+    assert ctx.session_id == 'sess-1'
+
+
+def test_compaction_context_falls_back_to_agent_id_for_session():
+    ctx = hooklib.compaction_context({'agent_id': 'agent-9'})
+    assert ctx.session_id == 'agent-9'
+
+
+def test_compaction_context_fails_open_on_malformed_values():
+    class Boom:
+        def __bool__(self):
+            raise RuntimeError('boom')
+
+    ctx = hooklib.compaction_context({'agent_type': Boom()})
+    assert ctx.agent_type == 'main'
+
+
+def test_spool_event_writes_one_json_file(tmp_path):
+    payload = {'cwd': str(tmp_path), 'session_id': 'sess-1'}
+    hooklib.spool_event(payload, {'kind': 'agent_session', 'model': 'sonnet'})
+
+    files = list((tmp_path / '.agentmaster' / 'events').glob('*.json'))
+    assert len(files) == 1
+    record = json.loads(files[0].read_text())
+    assert record == {
+        'schema_version': 1,
+        'harness_session_id': 'sess-1',
+        'kind': 'agent_session',
+        'model': 'sonnet',
+    }
+
+
+def test_spool_event_defaults_session_id_when_absent(tmp_path):
+    payload = {'cwd': str(tmp_path)}
+    hooklib.spool_event(payload, {'kind': 'compaction'})
+
+    files = list((tmp_path / '.agentmaster' / 'events').glob('*.json'))
+    record = json.loads(files[0].read_text())
+    assert record['harness_session_id'] == 'default'
+
+
+def test_spool_event_two_calls_never_collide(tmp_path):
+    payload = {'cwd': str(tmp_path), 'session_id': 'sess-1'}
+    hooklib.spool_event(payload, {'kind': 'agent_session', 'n': 1})
+    hooklib.spool_event(payload, {'kind': 'agent_session', 'n': 2})
+
+    files = list((tmp_path / '.agentmaster' / 'events').glob('*.json'))
+    assert len(files) == 2
+
+
+def test_spool_event_fails_open_on_unwritable_events_dir(tmp_path):
+    payload = {'cwd': str(tmp_path), 'session_id': 'sess-1'}
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    events = am / 'events'
+    events.write_text('not a directory')
+
+    hooklib.spool_event(payload, {'kind': 'agent_session'})  # must not raise
+
+    assert events.is_file()

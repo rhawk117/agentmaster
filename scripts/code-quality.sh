@@ -77,9 +77,23 @@ run_test() {
     fi
     log_step_end
 
-    log_step "pytest"
-    if ! uv run python -m pytest tests/; then
-        log_error "Tests failed"
+    log_step "pytest (unit: not subprocess and not integration)"
+    if ! uv run python -m pytest -m "not subprocess and not integration" tests/; then
+        log_error "Unit tests failed"
+        failed=1
+    fi
+    log_step_end
+
+    log_step "pytest (subprocess: subprocess and not integration)"
+    if ! uv run python -m pytest -m "subprocess and not integration" tests/; then
+        log_error "Subprocess tests failed"
+        failed=1
+    fi
+    log_step_end
+
+    log_step "pytest (integration)"
+    if ! uv run python -m pytest -m integration tests/; then
+        log_error "Integration tests failed"
         failed=1
     fi
     log_step_end
@@ -91,8 +105,21 @@ run_validate() {
     local failed=0
 
     log_step "installer parity validation"
-    if ! uv run python install.py validate --target all; then
+    if ! uv run python install.py validate; then
         log_error "Parity validation failed"
+        failed=1
+    fi
+    log_step_end
+
+    return $failed
+}
+
+run_security() {
+    local failed=0
+
+    log_step "bandit"
+    if ! uv run bandit -c pyproject.toml -r install.py installer agentmaster ledger hooks scripts; then
+        log_error "Security scan failed"
         failed=1
     fi
     log_step_end
@@ -121,6 +148,7 @@ run_all() {
     run_typecheck || failed=1
     run_test || failed=1
     run_validate || failed=1
+    run_security || failed=1
 
     if [[ $failed -eq 1 ]]; then
         log_error "One or more quality checks failed"
@@ -136,10 +164,11 @@ case "${1:-all}" in
     typecheck) run_typecheck || exit 1;;
     test)      run_test || exit 1;;
     validate)  run_validate || exit 1;;
+    security)  run_security || exit 1;;
     format)    run_format;;
     all)       run_all;;
     *)
-        echo "Usage: $(basename "$0") [lint|shell|typecheck|test|validate|format|all]" >&2
+        echo "Usage: $(basename "$0") [lint|shell|typecheck|test|validate|security|format|all]" >&2
         exit 1
         ;;
 esac

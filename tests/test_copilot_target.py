@@ -6,7 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from installer.config import CopilotRoleConfig
 from installer.copilot import default_home, install, uninstall
+
+
+def _roles(
+    *, coordinator: str = 'opus-test', implementer: str = 'claude-sonnet-4.6'
+) -> CopilotRoleConfig:
+    return CopilotRoleConfig(coordinator_model=coordinator, implementer_model=implementer)
 
 
 def _hook_commands(agentmaster_json: Path) -> list[str]:
@@ -26,11 +33,11 @@ def _referenced_hook(command: str) -> Path:
 def test_fresh_install_creates_everything(tmp_path: Path, repo_root, statuses) -> None:
     home = tmp_path / 'copilot-home'
 
-    report = install(repo_root, home, model='opus-test', dry_run=False)
+    report = install(repo_root, home, roles=_roles(), dry_run=False)
 
     assert set(statuses(report.entries)) == {'create'}
     agents = sorted(p.name for p in (home / 'agents').glob('*.agent.md'))
-    assert len(agents) == 8
+    assert len(agents) == 9
     for skill in (
         'agentmaster-plan',
         'agentmaster-execute',
@@ -51,7 +58,7 @@ def test_fresh_install_creates_everything(tmp_path: Path, repo_root, statuses) -
 def test_coordinators_repinned_workers_keep_pins(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'copilot-home'
 
-    install(repo_root, home, model='opus-test', dry_run=False)
+    install(repo_root, home, roles=_roles(), dry_run=False)
 
     for coordinator in (
         'agentmaster-plan',
@@ -67,9 +74,9 @@ def test_coordinators_repinned_workers_keep_pins(tmp_path: Path, repo_root) -> N
 
 def test_idempotent_rerun_creates_nothing(tmp_path: Path, repo_root, statuses) -> None:
     home = tmp_path / 'copilot-home'
-    install(repo_root, home, model='opus-test', dry_run=False)
+    install(repo_root, home, roles=_roles(), dry_run=False)
 
-    report = install(repo_root, home, model='opus-test', dry_run=False)
+    report = install(repo_root, home, roles=_roles(), dry_run=False)
 
     assert 'create' not in statuses(report.entries)
 
@@ -77,7 +84,7 @@ def test_idempotent_rerun_creates_nothing(tmp_path: Path, repo_root, statuses) -
 def test_dry_run_writes_nothing(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'copilot-home'
 
-    report = install(repo_root, home, model='opus-test', dry_run=True)
+    report = install(repo_root, home, roles=_roles(), dry_run=True)
 
     assert report.entries
     assert not home.exists()
@@ -85,7 +92,7 @@ def test_dry_run_writes_nothing(tmp_path: Path, repo_root) -> None:
 
 def test_uninstall_removes_ours_and_spares_others(tmp_path: Path, repo_root) -> None:
     home = tmp_path / 'copilot-home'
-    install(repo_root, home, model='opus-test', dry_run=False)
+    install(repo_root, home, roles=_roles(), dry_run=False)
     other = home / 'hooks' / 'other.json'
     other.write_text('{}\n', encoding='utf-8')
 
@@ -142,7 +149,13 @@ def test_fake_manifest_installs_only_declared(tmp_path: Path, make_manifest) -> 
         substitutions={'%USES_RULE%': {'claude': 'x', 'copilot': 'y'}},
     )
 
-    install(fake_root, home, model='m1', dry_run=False, manifest=manifest)
+    install(
+        fake_root,
+        home,
+        roles=_roles(coordinator='m1', implementer='m1'),
+        dry_run=False,
+        manifest=manifest,
+    )
 
     installed_scout = (home / 'agents' / 'scout.agent.md').read_text(encoding='utf-8')
     assert 'shared body' in installed_scout  # rendered from the fake root, not the repo
@@ -173,6 +186,12 @@ def test_preflight_missing_source_raises_and_writes_nothing(
     )
 
     with pytest.raises(FileNotFoundError):
-        install(fake_root, home, model='m1', dry_run=False, manifest=manifest)
+        install(
+            fake_root,
+            home,
+            roles=_roles(coordinator='m1', implementer='m1'),
+            dry_run=False,
+            manifest=manifest,
+        )
 
     assert not home.exists()
