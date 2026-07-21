@@ -4,7 +4,12 @@ import sqlite3
 
 import pytest
 
-from ledger.connection import BUSY_TIMEOUT_MS, connect, select_journal_mode
+from ledger.connection import (
+    BUSY_TIMEOUT_MS,
+    connect,
+    connect_read_only,
+    select_journal_mode,
+)
 
 
 @pytest.mark.sqlite
@@ -111,3 +116,29 @@ def test_connect_closes_the_connection_if_pragma_setup_fails(tmp_path, monkeypat
     assert len(captured) == 1
     with pytest.raises(sqlite3.ProgrammingError, match='closed database'):
         captured[0].execute('SELECT 1')
+
+
+@pytest.mark.sqlite
+def test_connect_read_only_enables_query_only(tmp_path):
+    ledger_path = tmp_path / 'ledger.sqlite3'
+    connect(ledger_path).close()
+
+    connection = connect_read_only(ledger_path)
+    try:
+        (query_only,) = connection.execute('PRAGMA query_only').fetchone()
+        assert query_only == 1
+    finally:
+        connection.close()
+
+
+@pytest.mark.sqlite
+def test_connect_read_only_rejects_a_write(tmp_path):
+    ledger_path = tmp_path / 'ledger.sqlite3'
+    connect(ledger_path).close()
+
+    connection = connect_read_only(ledger_path)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match='readonly'):
+            connection.execute('CREATE TABLE t (id TEXT)')
+    finally:
+        connection.close()

@@ -82,6 +82,20 @@ def select_journal_mode(ledger_path: Path) -> JournalDecision:
     return JournalDecision(mode='WAL', reason='local filesystem and sqlite >= 3.51.3')
 
 
+def connect_read_only(ledger_path: Path) -> sqlite3.Connection:
+    """Open a query-only connection to an existing ledger (SPEC.md §18).
+
+    The retrospective capability "connects read-only to allow-listed views
+    using a SQLite URI such as file:...?...mode=ro and enables PRAGMA
+    query_only = ON. It must not have a general write connection" (§18): a
+    `mode=ro` URI keeps SQLite itself from ever opening the file for writing,
+    and `PRAGMA query_only = ON` is a second, connection-local backstop.
+    """
+    connection = sqlite3.connect(f'file:{ledger_path}?mode=ro', uri=True)
+    connection.execute('PRAGMA query_only = ON')
+    return connection
+
+
 def connect(ledger_path: Path) -> sqlite3.Connection:
     """Open a ledger connection with foreign keys, busy timeout, and journal mode set.
 

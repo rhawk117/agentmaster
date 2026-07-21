@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ledger import cli as ledger_cli
-from ledger.connection import connect
+from ledger.connection import connect, connect_read_only
 from ledger.context_pack import (
     ContextPackRequest,
     RunNotFoundError,
@@ -65,6 +65,14 @@ from ledger.memory_service import (
 )
 from ledger.orchestrator_state import RunTransitionInput, transition_run
 from ledger.queries import query_entrypoints, query_runs, query_tokens
+from ledger.retrospective import (
+    MemoryCandidateProposal,
+    RetrospectiveClock,
+    RunNotReadyForRetrospectiveError,
+    propose_memory_candidate,
+    run_retrospective,
+)
+from ledger.worth import compute_memory_worth, compute_procedure_worth, compute_run_worth
 
 if TYPE_CHECKING:
     import sqlite3
@@ -647,6 +655,161 @@ def _cmd_delivery_merge_gate(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- retro group --------------------------------------------------------------
+
+
+def _cmd_retro_run(args: argparse.Namespace) -> int:
+    ledger_path = Path(args.path)
+    read_connection = connect_read_only(ledger_path)
+    connection = connect(ledger_path)
+    try:
+        result = run_retrospective(
+            connection,
+            read_connection,
+            args.run_id,
+            RetrospectiveClock(now=_now(), id_factory=lambda: str(uuid.uuid4())),
+        )
+    except RunNotReadyForRetrospectiveError as error:
+        print(f'retro run: {error}', file=sys.stderr)
+        return 1
+    finally:
+        connection.close()
+        read_connection.close()
+    _emit(
+        json_output=args.json_output,
+        payload=asdict(result),
+        text_lines=[f'{result.retrospective_id} [{result.outcome}] {result.summary}'],
+    )
+    return 0
+
+
+def _cmd_retro_show(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    try:
+        retrospective = connection.execute(
+            'SELECT id, status, outcome, summary FROM RETROSPECTIVE WHERE run_id = ?',
+            (args.run_id,),
+        ).fetchone()
+        if retrospective is None:
+            print(
+                f'retro show: no retrospective recorded for run {args.run_id!r}',
+                file=sys.stderr,
+            )
+            return 1
+        retrospective_id, status, outcome, summary = retrospective
+        observations = connection.execute(
+            'SELECT id, observation_kind, claim, confidence, counterfactual '
+            'FROM RETRO_OBSERVATION WHERE retrospective_id = ? ORDER BY id',
+            (retrospective_id,),
+        ).fetchall()
+    finally:
+        connection.close()
+    payload = {
+        'retrospective_id': retrospective_id,
+        'status': status,
+        'outcome': outcome,
+        'summary': summary,
+        'observations': [
+            {
+                'id': row[0],
+                'observation_kind': row[1],
+                'claim': row[2],
+                'confidence': row[3],
+                'counterfactual': row[4],
+            }
+            for row in observations
+        ],
+    }
+    _emit(
+        json_output=args.json_output,
+        payload=payload,
+        text_lines=[
+            f'{retrospective_id} [{status}] {outcome}: {summary}',
+            *[f'  {row[1]}: {row[2]}' for row in observations],
+        ],
+    )
+    return 0
+
+
+def _cmd_retro_propose(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    proposal = MemoryCandidateProposal(
+        memory_id=args.memory_id,
+        project_id=args.project_id,
+        memory_kind=args.memory_kind,
+        title=args.title,
+        content=args.content,
+        observation_id=args.observation_id,
+        evidence_id=args.evidence_id,
+        proposing_session_id=args.proposing_session_id,
+        confidence=args.confidence,
+    )
+    try:
+        propose_memory_candidate(connection, proposal, created_at=_now())
+    finally:
+        connection.close()
+    print(proposal.memory_id)
+    return 0
+
+
+# --- worth group --------------------------------------------------------------
+
+
+def _cmd_worth_run(args: argparse.Namespace) -> int:
+    connection = connect_read_only(Path(args.path))
+    try:
+        report = compute_run_worth(connection, args.run_id)
+    finally:
+        connection.close()
+    if report is None:
+        print(f'worth run: no run {args.run_id!r} recorded', file=sys.stderr)
+        return 1
+    _emit(
+        json_output=args.json_output,
+        payload=asdict(report),
+        text_lines=[
+            f'{report.run_id} [{report.outcome_state}] '
+            f'tasks={report.completed_task_count}/{report.task_count} '
+            f'tokens={report.total_input_tokens}+{report.total_output_tokens} '
+            f'unresolved_findings={report.unresolved_finding_count}',
+        ],
+    )
+    return 0
+
+
+def _cmd_worth_memory(args: argparse.Namespace) -> int:
+    connection = connect_read_only(Path(args.path))
+    try:
+        report = compute_memory_worth(connection, args.memory_id)
+    finally:
+        connection.close()
+    _emit(
+        json_output=args.json_output,
+        payload=asdict(report),
+        text_lines=[
+            f'{report.memory_id} retrievals={report.retrieval_count} '
+            f'helpful={report.helpful_count} harmful={report.harmful_count}',
+        ],
+    )
+    return 0
+
+
+def _cmd_worth_procedure(args: argparse.Namespace) -> int:
+    connection = connect_read_only(Path(args.path))
+    try:
+        report = compute_procedure_worth(connection, args.procedure_id)
+    finally:
+        connection.close()
+    _emit(
+        json_output=args.json_output,
+        payload=asdict(report),
+        text_lines=[
+            f'{report.procedure_id} uses={report.use_count} {report.outcome_counts}'
+        ],
+    )
+    return 0
+
+
 # --- argument parsing --------------------------------------------------------
 
 
@@ -851,6 +1014,65 @@ def _build_delivery_subparser(sub: argparse._SubParsersAction) -> dict[str, Call
     }
 
 
+def _build_retro_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
+    retro_parser = sub.add_parser('retro')
+    retro_sub = retro_parser.add_subparsers(dest='command', required=True)
+
+    run_cmd = retro_sub.add_parser('run')
+    _add_path_argument(run_cmd)
+    _add_json_argument(run_cmd)
+    run_cmd.add_argument('--run-id', required=True)
+
+    show_cmd = retro_sub.add_parser('show')
+    _add_path_argument(show_cmd)
+    _add_json_argument(show_cmd)
+    show_cmd.add_argument('--run-id', required=True)
+
+    propose_cmd = retro_sub.add_parser('propose')
+    _add_path_argument(propose_cmd)
+    propose_cmd.add_argument('--memory-id', required=True)
+    propose_cmd.add_argument('--project-id', required=True)
+    propose_cmd.add_argument('--memory-kind', required=True)
+    propose_cmd.add_argument('--title', required=True)
+    propose_cmd.add_argument('--content', required=True)
+    propose_cmd.add_argument('--observation-id', required=True)
+    propose_cmd.add_argument('--evidence-id', required=True)
+    propose_cmd.add_argument('--proposing-session-id', default=None)
+    propose_cmd.add_argument('--confidence', default=None)
+
+    return {
+        'run': _cmd_retro_run,
+        'show': _cmd_retro_show,
+        'propose': _cmd_retro_propose,
+    }
+
+
+def _build_worth_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
+    worth_parser = sub.add_parser('worth')
+    worth_sub = worth_parser.add_subparsers(dest='command', required=True)
+
+    run_cmd = worth_sub.add_parser('run')
+    _add_path_argument(run_cmd)
+    _add_json_argument(run_cmd)
+    run_cmd.add_argument('--run-id', required=True)
+
+    memory_cmd = worth_sub.add_parser('memory')
+    _add_path_argument(memory_cmd)
+    _add_json_argument(memory_cmd)
+    memory_cmd.add_argument('--memory-id', required=True)
+
+    procedure_cmd = worth_sub.add_parser('procedure')
+    _add_path_argument(procedure_cmd)
+    _add_json_argument(procedure_cmd)
+    procedure_cmd.add_argument('--procedure-id', required=True)
+
+    return {
+        'run': _cmd_worth_run,
+        'memory': _cmd_worth_memory,
+        'procedure': _cmd_worth_procedure,
+    }
+
+
 def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, dict[str, Callable]]]:
     parser = argparse.ArgumentParser(prog='agentmaster')
     sub = parser.add_subparsers(dest='group', required=True)
@@ -860,6 +1082,8 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, dict[str, Callab
         'context': _build_context_subparser(sub),
         'migrate': _build_migrate_subparser(sub),
         'delivery': _build_delivery_subparser(sub),
+        'retro': _build_retro_subparser(sub),
+        'worth': _build_worth_subparser(sub),
     }
     return parser, groups
 
