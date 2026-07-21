@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import pytest
+from conftest import SeededMemory, seed_memory, seed_project_run_task
 
 from ledger.connection import connect
 from ledger.context_pack import (
@@ -13,69 +14,22 @@ from ledger.context_pack import (
     TaskNotFoundError,
     build_context_pack,
 )
-from ledger.migrations import migrate
 
 _CREATED_AT = '2026-07-20T00:00:00Z'
 
 
-def _seed_project(connection, project_id='project-1'):
-    connection.execute(
-        'INSERT INTO PROJECT (id, canonical_root, fingerprint, created_at, last_seen_at) '
-        'VALUES (?, ?, ?, ?, ?)',
-        (project_id, '/repo', f'fp-{project_id}', _CREATED_AT, _CREATED_AT),
-    )
-    connection.commit()
-
-
-def _seed_run_and_task(connection, *, acceptance_json=None):
-    _seed_project(connection)
-    connection.execute(
-        'INSERT INTO USER_SESSION (user_session_id, harness_session_id, created_at) '
-        "VALUES ('user-session-1', 'harness-1', ?)",
-        (_CREATED_AT,),
-    )
-    connection.execute(
-        'INSERT INTO RUN '
-        '(id, project_id, user_session_id, delivery_mode, state, started_at) '
-        "VALUES ('run-1', 'project-1', 'user-session-1', 'local', 'Planned', ?)",
-        (_CREATED_AT,),
-    )
-    connection.execute(
-        'INSERT INTO TASK (id, run_id, title, state, sequence_no, acceptance_json) '
-        "VALUES ('task-1', 'run-1', 'retry backoff', 'ready', 1, ?)",
-        (acceptance_json,),
-    )
-    connection.commit()
-
-
-def _insert_active_memory(connection, memory_id, *, content):
-    connection.execute(
-        'INSERT INTO MEMORY '
-        '(id, origin_project_id, state, memory_kind, title, content, created_at, '
-        'updated_at) '
-        "VALUES (?, 'project-1', 'Active', 'lesson', 'title', ?, ?, ?)",
-        (memory_id, content, _CREATED_AT, _CREATED_AT),
-    )
-    connection.execute(
-        'INSERT INTO MEMORY_SCOPE (memory_id, scope_kind, project_id, created_at) '
-        "VALUES (?, 'project', 'project-1', ?)",
-        (memory_id, _CREATED_AT),
-    )
-    connection.commit()
-
-
 @pytest.fixture
-def connection(tmp_path):
-    conn = connect(tmp_path / 'ledger.sqlite3')
-    migrate(conn)
-    yield conn
-    conn.close()
+def connection(ledger_connection):
+    return ledger_connection
 
 
 @pytest.mark.sqlite
 def test_build_context_pack_selects_matching_memories_within_budget(connection):
-    _seed_run_and_task(connection)
-    _insert_active_memory(connection, 'memory-1', content='retry backoff jitter guidance')
+    seed_project_run_task(connection)
+    seed_memory(
+        connection,
+        SeededMemory(memory_id='memory-1', content='retry backoff jitter guidance'),
+    )
     request = ContextPackRequest(
         project_id='project-1',
         user_session_id='user-session-1',
@@ -96,8 +50,11 @@ def test_build_context_pack_selects_matching_memories_within_budget(connection):
 
 @pytest.mark.sqlite
 def test_build_context_pack_truncates_when_budget_is_exhausted(connection):
-    _seed_run_and_task(connection)
-    _insert_active_memory(connection, 'memory-1', content='retry backoff jitter guidance')
+    seed_project_run_task(connection)
+    seed_memory(
+        connection,
+        SeededMemory(memory_id='memory-1', content='retry backoff jitter guidance'),
+    )
     request = ContextPackRequest(
         project_id='project-1',
         user_session_id='user-session-1',
@@ -114,7 +71,7 @@ def test_build_context_pack_truncates_when_budget_is_exhausted(connection):
 
 @pytest.mark.sqlite
 def test_build_context_pack_rejects_a_run_outside_the_session(connection):
-    _seed_run_and_task(connection)
+    seed_project_run_task(connection)
     request = ContextPackRequest(
         project_id='project-1',
         user_session_id='some-other-session',
@@ -143,7 +100,7 @@ def test_build_context_pack_rejects_an_unknown_run(connection):
 
 @pytest.mark.sqlite
 def test_build_context_pack_rejects_an_unknown_task(connection):
-    _seed_run_and_task(connection)
+    seed_project_run_task(connection)
     request = ContextPackRequest(
         project_id='project-1',
         user_session_id='user-session-1',
@@ -158,8 +115,11 @@ def test_build_context_pack_rejects_an_unknown_task(connection):
 
 @pytest.mark.sqlite
 def test_build_context_pack_records_one_memory_access_row_per_candidate(connection):
-    _seed_run_and_task(connection)
-    _insert_active_memory(connection, 'memory-1', content='retry backoff jitter guidance')
+    seed_project_run_task(connection)
+    seed_memory(
+        connection,
+        SeededMemory(memory_id='memory-1', content='retry backoff jitter guidance'),
+    )
     request = ContextPackRequest(
         project_id='project-1',
         user_session_id='user-session-1',
@@ -198,7 +158,7 @@ def test_agentmaster_context_build_subprocess_emits_json(tmp_path, repo_root):
     assert init.returncode == 0
 
     connection = connect(ledger_path)
-    _seed_run_and_task(connection)
+    seed_project_run_task(connection)
     connection.close()
 
     result = subprocess.run(  # noqa: S603

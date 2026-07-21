@@ -3,8 +3,8 @@
 import itertools
 
 import pytest
+from conftest import SeededMemory, seed_memory, seed_project_run_task
 
-from ledger.connection import connect
 from ledger.memory_service import (
     IllegalMemoryTransitionError,
     MemoryAccessLog,
@@ -18,7 +18,6 @@ from ledger.memory_service import (
     supersede_memory,
     validate_memory,
 )
-from ledger.migrations import migrate
 
 _CREATED_AT = '2026-07-20T00:00:00Z'
 _ids = itertools.count()
@@ -26,31 +25,6 @@ _ids = itertools.count()
 
 def _next_access_id() -> str:
     return f'access-{next(_ids)}'
-
-
-def _seed_project(connection, project_id='project-1'):
-    connection.execute(
-        'INSERT INTO PROJECT (id, canonical_root, fingerprint, created_at, last_seen_at) '
-        'VALUES (?, ?, ?, ?, ?)',
-        (project_id, '/repo', f'fp-{project_id}', _CREATED_AT, _CREATED_AT),
-    )
-    connection.commit()
-
-
-def _seed_run_and_task(connection):
-    _seed_project(connection)
-    connection.execute(
-        'INSERT INTO USER_SESSION (user_session_id, harness_session_id, created_at) '
-        "VALUES ('user-session-1', 'harness-1', ?)",
-        (_CREATED_AT,),
-    )
-    connection.execute(
-        'INSERT INTO RUN '
-        '(id, project_id, user_session_id, delivery_mode, state, started_at) '
-        "VALUES ('run-1', 'project-1', 'user-session-1', 'local', 'Planned', ?)",
-        (_CREATED_AT,),
-    )
-    connection.commit()
 
 
 def _seed_agent_session(connection, agent_session_id):
@@ -72,11 +46,6 @@ def _insert_memory(
     content='content',
     proposing_session_id=None,
 ):
-    if (
-        connection.execute("SELECT 1 FROM PROJECT WHERE id = 'project-1'").fetchone()
-        is None
-    ):
-        _seed_project(connection)
     connection.execute(
         'INSERT INTO MEMORY '
         '(id, origin_project_id, state, memory_kind, title, content, '
@@ -103,18 +72,20 @@ def _insert_memory(
 
 
 @pytest.fixture
-def connection(tmp_path):
-    conn = connect(tmp_path / 'ledger.sqlite3')
-    migrate(conn)
-    _seed_run_and_task(conn)
-    yield conn
-    conn.close()
+def connection(ledger_connection):
+    seed_project_run_task(ledger_connection)
+    return ledger_connection
 
 
 @pytest.mark.sqlite
 def test_search_memories_returns_ranked_results_and_logs_memory_access(connection):
-    _insert_memory(
-        connection, 'memory-1', state='Active', content='Use jittered backoff for retries'
+    seed_memory(
+        connection,
+        SeededMemory(
+            memory_id='memory-1',
+            state='Active',
+            content='Use jittered backoff for retries',
+        ),
     )
     scope = MemorySearchScope(project_id='project-1', run_id='run-1')
 
@@ -138,7 +109,10 @@ def test_search_memories_returns_ranked_results_and_logs_memory_access(connectio
 
 @pytest.mark.sqlite
 def test_search_memories_excludes_a_candidate_memory(connection):
-    _insert_memory(connection, 'memory-1', state='Candidate', content='backoff jitter')
+    seed_memory(
+        connection,
+        SeededMemory(memory_id='memory-1', state='Candidate', content='backoff jitter'),
+    )
     scope = MemorySearchScope(project_id='project-1', run_id='run-1')
 
     results = search_memories(
@@ -158,7 +132,10 @@ def test_show_memory_returns_none_for_an_unknown_id(connection):
 
 @pytest.mark.sqlite
 def test_show_memory_returns_the_full_row(connection):
-    _insert_memory(connection, 'memory-1', state='Active', title='Retry backoff')
+    seed_memory(
+        connection,
+        SeededMemory(memory_id='memory-1', state='Active', title='Retry backoff'),
+    )
 
     detail = show_memory(connection, 'memory-1')
 
@@ -171,7 +148,7 @@ def test_show_memory_returns_the_full_row(connection):
 def test_validate_memory_transitions_candidate_to_validated_and_links_evidence(
     connection,
 ):
-    _insert_memory(connection, 'memory-1', state='Candidate')
+    seed_memory(connection, SeededMemory(memory_id='memory-1', state='Candidate'))
     connection.execute(
         'INSERT INTO ARTIFACT '
         '(id, project_id, sha256, media_type, byte_size, relative_path, retention_class, '
@@ -269,7 +246,7 @@ def test_validate_memory_accepts_a_validating_session_that_differs_from_the_prop
 
 @pytest.mark.sqlite
 def test_activate_memory_requires_validated_state(connection):
-    _insert_memory(connection, 'memory-1', state='Candidate')
+    seed_memory(connection, SeededMemory(memory_id='memory-1', state='Candidate'))
 
     with pytest.raises(IllegalMemoryTransitionError):
         activate_memory(connection, 'memory-1', updated_at=_CREATED_AT)
@@ -277,7 +254,7 @@ def test_activate_memory_requires_validated_state(connection):
 
 @pytest.mark.sqlite
 def test_reject_memory_transitions_a_candidate(connection):
-    _insert_memory(connection, 'memory-1', state='Candidate')
+    seed_memory(connection, SeededMemory(memory_id='memory-1', state='Candidate'))
 
     reject_memory(connection, 'memory-1', updated_at=_CREATED_AT)
 
@@ -289,7 +266,7 @@ def test_reject_memory_transitions_a_candidate(connection):
 
 @pytest.mark.sqlite
 def test_reject_memory_refuses_an_archived_memory(connection):
-    _insert_memory(connection, 'memory-1', state='Archived')
+    seed_memory(connection, SeededMemory(memory_id='memory-1', state='Archived'))
 
     with pytest.raises(IllegalMemoryTransitionError):
         reject_memory(connection, 'memory-1', updated_at=_CREATED_AT)
@@ -303,7 +280,9 @@ def test_transition_on_an_unknown_memory_raises_not_found(connection):
 
 @pytest.mark.sqlite
 def test_supersede_memory_creates_a_new_active_memory_and_link(connection):
-    _insert_memory(connection, 'memory-1', state='Active', title='old title')
+    seed_memory(
+        connection, SeededMemory(memory_id='memory-1', state='Active', title='old title')
+    )
     new_memory = NewMemoryInput(
         id='memory-2',
         origin_project_id='project-1',
