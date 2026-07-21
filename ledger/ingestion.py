@@ -11,8 +11,10 @@ the same harness session never creates a second USER_SESSION. Every id
 derived from event identity (agent id, event kind) is deterministic, so
 re-ingesting an already-processed spool file is a no-op rather than a
 duplicate row (`INSERT OR IGNORE` plus MODEL_CALL's existing
-`ux_model_call_agent_session_provider_call` unique index). `entrypoint_id`
-is left NULL throughout: ENTRYPOINT seeding is Microtask 19's job.
+`ux_model_call_agent_session_provider_call` unique index). AGENT_SESSION's
+`entrypoint_id` resolves the event's agent-type name against active
+`kind='agent'` ENTRYPOINT rows (SPEC.md §23 Microtask 19); an unresolved
+name stays NULL rather than guessing.
 """
 
 import hashlib
@@ -147,6 +149,22 @@ def _agent_session_id(run_id: str, agent_key: str) -> str:
     return f'agent-session:{run_id}:{agent_key}'
 
 
+def resolve_agent_entrypoint_id(
+    connection: sqlite3.Connection, agent_name: str
+) -> str | None:
+    """Resolve `agent_name` to its active `kind='agent'` ENTRYPOINT id, or `None`.
+
+    `None` when `agent_name` has no matching active row (not yet seeded,
+    retired, or never listed by the installer manifest) rather than a
+    synthetic id (SPEC.md §16.3: never fabricate).
+    """
+    row = connection.execute(
+        "SELECT id FROM ENTRYPOINT WHERE kind = 'agent' AND name = ? AND active = 1",
+        (agent_name,),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
 def _nonneg_int(value: str | float | None) -> int | None:
     """Return `value` as a non-negative int.
 
@@ -198,12 +216,13 @@ def _ingest_agent_session_event(
     )
 
     def _op(conn: sqlite3.Connection) -> None:
+        entrypoint_id = resolve_agent_entrypoint_id(conn, role)
         conn.execute(
             'INSERT OR IGNORE INTO AGENT_SESSION '
             '(id, run_id, entrypoint_id, role, provider, model, state, started_at, '
             'ended_at) '
-            "VALUES (?, ?, NULL, ?, 'claude', ?, 'complete', ?, ?)",
-            (agent_session_id, run_id, role, model, now(), now()),
+            "VALUES (?, ?, ?, ?, 'claude', ?, 'complete', ?, ?)",
+            (agent_session_id, run_id, entrypoint_id, role, model, now(), now()),
         )
         conn.execute(
             'INSERT OR IGNORE INTO MODEL_CALL '
@@ -315,11 +334,12 @@ def _ingest_compaction_event(
     compaction_id = f'compaction:{agent_session_id}:{trigger}:{pre_tokens}'
 
     def _op(conn: sqlite3.Connection) -> None:
+        entrypoint_id = resolve_agent_entrypoint_id(conn, agent_key)
         conn.execute(
             'INSERT OR IGNORE INTO AGENT_SESSION '
             '(id, run_id, entrypoint_id, role, provider, model, state, started_at) '
-            "VALUES (?, ?, NULL, ?, 'claude', '', 'active', ?)",
-            (agent_session_id, run_id, agent_key, now()),
+            "VALUES (?, ?, ?, ?, 'claude', '', 'active', ?)",
+            (agent_session_id, run_id, entrypoint_id, agent_key, now()),
         )
         conn.execute(
             'INSERT OR IGNORE INTO COMPACTION_EVENT '

@@ -43,6 +43,7 @@ CREATE TABLE ENTRYPOINT (
 );
 
 CREATE INDEX idx_entrypoint_kind_active ON ENTRYPOINT(kind, active);
+CREATE UNIQUE INDEX idx_entrypoint_kind_name ON ENTRYPOINT(kind, name);
 
 -- --- projects, runs, and tasks --------------------------------------------
 

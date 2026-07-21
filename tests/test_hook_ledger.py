@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from ledger.entrypoint_seed import seed_entrypoints
 from ledger.event_spool import read_events
 from ledger.ingestion import ingest_pending_events, resolve_project, upsert_user_session
 
@@ -108,6 +109,83 @@ def test_ingest_agent_session_event_creates_correct_fk_chain(ledger_connection, 
     assert model_call[1] is None
     assert model_call[2] == 100
     assert json.loads(model_call[3]) == {'total_tokens': 42}
+
+
+@pytest.mark.sqlite
+def test_ingest_agent_session_event_resolves_entrypoint_id_for_a_seeded_agent(
+    ledger_connection, tmp_path, make_manifest
+):
+    seed_entrypoints(
+        ledger_connection,
+        id_factory=_id_factory(),
+        now=_now,
+        manifest=make_manifest(workers=('scout',)),
+        command_registry=(),
+    )
+    entrypoint_id = ledger_connection.execute(
+        "SELECT id FROM ENTRYPOINT WHERE kind = 'agent' AND name = 'scout'"
+    ).fetchone()[0]
+    spool = tmp_path / 'events'
+    _write_event(
+        spool,
+        '1.json',
+        {
+            'schema_version': 1,
+            'kind': 'agent_session',
+            'harness_session_id': 'harness-1',
+            'cwd': '/repo',
+            'agent_id': 'agent-1',
+            'role': 'scout',
+            'model': 'haiku',
+            'total_tokens': 42,
+            'duration_ms': 100,
+        },
+    )
+
+    ingest_pending_events(ledger_connection, spool, id_factory=_id_factory(), now=_now)
+
+    agent_session = ledger_connection.execute(
+        'SELECT entrypoint_id FROM AGENT_SESSION'
+    ).fetchone()
+    assert agent_session == (entrypoint_id,)
+
+
+@pytest.mark.sqlite
+def test_ingest_compaction_event_resolves_entrypoint_id_for_a_seeded_agent(
+    ledger_connection, tmp_path, make_manifest
+):
+    seed_entrypoints(
+        ledger_connection,
+        id_factory=_id_factory(),
+        now=_now,
+        manifest=make_manifest(workers=('implementer',)),
+        command_registry=(),
+    )
+    entrypoint_id = ledger_connection.execute(
+        "SELECT id FROM ENTRYPOINT WHERE kind = 'agent' AND name = 'implementer'"
+    ).fetchone()[0]
+    spool = tmp_path / 'events'
+    _write_event(
+        spool,
+        '1.json',
+        {
+            'schema_version': 1,
+            'kind': 'compaction',
+            'harness_session_id': 'harness-1',
+            'cwd': '/repo',
+            'agent_type': 'implementer',
+            'trigger': 'auto',
+            'token_count': 9000,
+            'snapshot_dir': None,
+        },
+    )
+
+    ingest_pending_events(ledger_connection, spool, id_factory=_id_factory(), now=_now)
+
+    agent_session = ledger_connection.execute(
+        'SELECT entrypoint_id FROM AGENT_SESSION'
+    ).fetchone()
+    assert agent_session == (entrypoint_id,)
 
 
 @pytest.mark.sqlite
