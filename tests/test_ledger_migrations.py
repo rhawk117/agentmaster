@@ -65,3 +65,29 @@ def test_migrate_applies_pending_migrations_in_order(tmp_path, monkeypatch):
     assert applied == [1, 2]
     assert final_version == 2
     connection.close()
+
+
+@pytest.mark.sqlite
+def test_migrate_backs_up_before_a_pending_migration_on_a_non_fresh_database(
+    tmp_path, monkeypatch
+):
+    ledger_path = tmp_path / 'ledger.sqlite3'
+    backup_path = tmp_path / 'backup.sqlite3'
+    first = Migration(to_version=1, description='first', apply=lambda _connection: None)
+    second = Migration(to_version=2, description='second', apply=lambda _connection: None)
+    monkeypatch.setattr('ledger.migrations.MIGRATIONS', (first,))
+    monkeypatch.setattr('ledger.migrations.SUPPORTED_SCHEMA_VERSION', 1)
+    seed_connection = connect(ledger_path)
+    migrate(seed_connection)
+    assert not backup_path.exists()
+    seed_connection.close()
+    monkeypatch.undo()
+
+    monkeypatch.setattr('ledger.migrations.MIGRATIONS', (first, second))
+    monkeypatch.setattr('ledger.migrations.SUPPORTED_SCHEMA_VERSION', 2)
+    connection = connect(ledger_path)
+    final_version = migrate(connection, backup_path=backup_path)
+
+    assert final_version == 2
+    assert backup_path.exists()
+    connection.close()

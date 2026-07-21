@@ -832,6 +832,8 @@ Use check constraints for enums/ranges and indexes for foreign keys and commonpr
 
 Use triggers only for FTS synchronization and simple immutable audit fields.Business transitions remain typed Python operations with tests.
 
+Migrations are stored as per-name SQL directories, one readable SQL fileeach: ledger/migrations/<name>/upgrade.sql, applied forward-only in lexicographicdirectory-name order. Until v2.0.0 ships there is a single 0001_initialmigration holding the complete schema; schema changes edit that file inplace, and the chain only grows once v2.0.0 has released.
+
 16.4 Index policy
 
 Every foreign key in §17 has a named index, and every common project/time/state/entrypoint query path has a matching named index. This makes the ruleat §16.3 (indexes for foreign keys and common project/time/state queries)concrete rather than left to migration authors' discretion.

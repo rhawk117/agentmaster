@@ -4,6 +4,13 @@ Each migration runs in its own transaction and bumps `PRAGMA user_version`
 on success; a failure rolls back only that migration, leaving earlier ones
 applied. A database reporting a schema version newer than
 `SUPPORTED_SCHEMA_VERSION` is refused rather than risk misreading it.
+
+`MIGRATIONS` is discovered from `ledger/migrations/<name>/upgrade.sql`
+directories (`ledger/schema.py`), applied in lexicographic directory-name
+order, and stamps `user_version` with each migration's numeric ordinal.
+Pre-release policy: until v2.0.0 ships, schema changes edit
+`ledger/migrations/0001_initial/upgrade.sql` in place; the chain only grows
+once v2.0.0 has released.
 """
 
 import sqlite3

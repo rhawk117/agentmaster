@@ -10,7 +10,7 @@ import sqlite3
 import pytest
 
 from ledger.connection import connect
-from ledger.migrations import MIGRATIONS, SUPPORTED_SCHEMA_VERSION, migrate
+from ledger.migrations import migrate
 
 _CREATED_AT = '2026-07-20T00:00:00Z'
 
@@ -217,26 +217,4 @@ def test_feedback_user_session_id_rejects_an_agent_session_id(tmp_path):
             'VALUES (?, ?, ?, ?, ?)',
             ('feedback-1', 'agent-session-1', 'run-1', 1, _CREATED_AT),
         )
-    connection.close()
-
-
-@pytest.mark.sqlite
-def test_migrate_from_schema_version_3_backs_up_before_reaching_the_current_version(
-    tmp_path, monkeypatch
-):
-    ledger_path = tmp_path / 'ledger.sqlite3'
-    pre_memory = tuple(migration for migration in MIGRATIONS if migration.to_version <= 3)
-    monkeypatch.setattr('ledger.migrations.MIGRATIONS', pre_memory)
-    monkeypatch.setattr('ledger.migrations.SUPPORTED_SCHEMA_VERSION', 3)
-    seed_connection = connect(ledger_path)
-    migrate(seed_connection)
-    seed_connection.close()
-    monkeypatch.undo()
-
-    backup_path = tmp_path / 'backups' / 'pre-memory.sqlite3'
-    connection = connect(ledger_path)
-    final_version = migrate(connection, backup_path=backup_path)
-
-    assert final_version == SUPPORTED_SCHEMA_VERSION
-    assert backup_path.exists()
     connection.close()
