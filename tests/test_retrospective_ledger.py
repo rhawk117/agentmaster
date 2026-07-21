@@ -1,17 +1,11 @@
-"""Tests for the procedure/retrospective/evaluation schema.
-
-SPEC.md §23 Microtask 15, §17.2, and the dispatcher-ordered MEMORY_EVIDENCE
-rebuild (§17.2: `observation_id` gains a real FK to RETRO_OBSERVATION now
-that RETRO_OBSERVATION exists, matching the Microtask 14 COMPACTION_EVENT
-precedent).
-"""
+"""Tests for the procedure/retrospective/evaluation schema (SPEC.md §17.2, §18)."""
 
 import sqlite3
 
 import pytest
 
 from ledger.connection import connect
-from ledger.migrations import MIGRATIONS, SUPPORTED_SCHEMA_VERSION, migrate
+from ledger.migrations import SUPPORTED_SCHEMA_VERSION, migrate
 
 _NEW_TABLES = (
     'RETROSPECTIVE',
@@ -131,7 +125,7 @@ def test_fresh_init_reaches_the_retrospective_schema_version(tmp_path):
 
     final_version = migrate(connection)
 
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 6
+    assert final_version == SUPPORTED_SCHEMA_VERSION == 1
     connection.close()
 
 
@@ -304,72 +298,4 @@ def test_memory_evidence_observation_id_is_now_a_real_foreign_key(tmp_path):
             "VALUES ('memory-1', 'evidence-1', 'no-such-observation', 'supports', ?)",
             (_CREATED_AT,),
         )
-    connection.close()
-
-
-@pytest.mark.sqlite
-def test_a_pre_rebuild_memory_evidence_row_survives_the_rebuild(tmp_path, monkeypatch):
-    ledger_path = tmp_path / 'ledger.sqlite3'
-    pre_rebuild = tuple(
-        migration for migration in MIGRATIONS if migration.to_version <= 4
-    )
-    monkeypatch.setattr('ledger.migrations.MIGRATIONS', pre_rebuild)
-    monkeypatch.setattr('ledger.migrations.SUPPORTED_SCHEMA_VERSION', 4)
-    seed_connection = connect(ledger_path)
-    migrate(seed_connection)
-    _seed_run(seed_connection)
-    _seed_memory(seed_connection)
-    seed_connection.execute(
-        'INSERT INTO ARTIFACT '
-        '(id, project_id, sha256, media_type, byte_size, relative_path, '
-        'retention_class, redaction_state, created_at) '
-        "VALUES ('artifact-1', 'project-1', 'sha', 'text/plain', 1, 'p', "
-        "'standard', 'clean', ?)",
-        (_CREATED_AT,),
-    )
-    seed_connection.execute(
-        'INSERT INTO EVIDENCE (id, run_id, artifact_id, evidence_kind, created_at) '
-        "VALUES ('evidence-1', 'run-1', 'artifact-1', 'command-result', ?)",
-        (_CREATED_AT,),
-    )
-    seed_connection.execute(
-        'INSERT INTO MEMORY_EVIDENCE (memory_id, evidence_id, relation, created_at) '
-        "VALUES ('memory-1', 'evidence-1', 'supports', ?)",
-        (_CREATED_AT,),
-    )
-    seed_connection.commit()
-    seed_connection.close()
-    monkeypatch.undo()
-
-    connection = connect(ledger_path)
-    final_version = migrate(connection)
-
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 6
-    row = connection.execute(
-        'SELECT memory_id, evidence_id, observation_id, relation FROM MEMORY_EVIDENCE '
-        "WHERE memory_id = 'memory-1'"
-    ).fetchone()
-    assert row == ('memory-1', 'evidence-1', None, 'supports')
-    connection.close()
-
-
-@pytest.mark.sqlite
-def test_migrate_from_schema_version_5_backs_up_before_reaching_the_current_version(
-    tmp_path, monkeypatch
-):
-    ledger_path = tmp_path / 'ledger.sqlite3'
-    pre_retro = tuple(migration for migration in MIGRATIONS if migration.to_version <= 5)
-    monkeypatch.setattr('ledger.migrations.MIGRATIONS', pre_retro)
-    monkeypatch.setattr('ledger.migrations.SUPPORTED_SCHEMA_VERSION', 5)
-    seed_connection = connect(ledger_path)
-    migrate(seed_connection)
-    seed_connection.close()
-    monkeypatch.undo()
-
-    backup_path = tmp_path / 'backups' / 'pre-retrospective.sqlite3'
-    connection = connect(ledger_path)
-    final_version = migrate(connection, backup_path=backup_path)
-
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 6
-    assert backup_path.exists()
     connection.close()

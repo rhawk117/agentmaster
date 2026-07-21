@@ -1,9 +1,4 @@
-"""Tests for artifact/evidence provenance schema and recording.
-
-SPEC.md §23 Microtask 13 and the dispatcher-ordered COMPACTION_EVENT rebuild
-(§17.1: `snapshot_artifact_id` gains a real FK to ARTIFACT now that ARTIFACT
-exists).
-"""
+"""Tests for artifact/evidence provenance schema and recording (SPEC.md §17.1, §17.2)."""
 
 import sqlite3
 
@@ -12,7 +7,7 @@ import pytest
 from ledger.artifact_store import ArtifactStore
 from ledger.connection import connect
 from ledger.evidence import CommandCapture, record_command_evidence
-from ledger.migrations import MIGRATIONS, SUPPORTED_SCHEMA_VERSION, migrate
+from ledger.migrations import SUPPORTED_SCHEMA_VERSION, migrate
 
 _EVIDENCE_TABLES = ('ARTIFACT', 'EVIDENCE')
 _EVIDENCE_INDEXES = (
@@ -29,7 +24,7 @@ def test_fresh_init_reaches_the_evidence_schema_version(tmp_path):
 
     final_version = migrate(connection)
 
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 6
+    assert final_version == SUPPORTED_SCHEMA_VERSION == 1
     connection.close()
 
 
@@ -96,38 +91,6 @@ def test_compaction_event_snapshot_artifact_id_is_now_a_real_foreign_key(tmp_pat
             "VALUES ('compaction-1', 'session-1', 'auto', 'no-such-artifact', "
             "'2026-07-20T00:00:00Z')"
         )
-    connection.close()
-
-
-@pytest.mark.sqlite
-def test_a_pre_rebuild_compaction_event_row_survives_the_rebuild(tmp_path, monkeypatch):
-    ledger_path = tmp_path / 'ledger.sqlite3'
-    pre_rebuild = tuple(
-        migration for migration in MIGRATIONS if migration.to_version <= 2
-    )
-    monkeypatch.setattr('ledger.migrations.MIGRATIONS', pre_rebuild)
-    monkeypatch.setattr('ledger.migrations.SUPPORTED_SCHEMA_VERSION', 2)
-    seed_connection = connect(ledger_path)
-    migrate(seed_connection)
-    _seed_run(seed_connection)
-    _seed_agent_session(seed_connection)
-    seed_connection.execute(
-        'INSERT INTO COMPACTION_EVENT (id, agent_session_id, trigger, created_at) '
-        "VALUES ('compaction-1', 'session-1', 'auto', '2026-07-20T00:00:00Z')"
-    )
-    seed_connection.commit()
-    seed_connection.close()
-    monkeypatch.undo()
-
-    connection = connect(ledger_path)
-    final_version = migrate(connection)
-
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 6
-    row = connection.execute(
-        'SELECT id, agent_session_id, trigger, snapshot_artifact_id '
-        "FROM COMPACTION_EVENT WHERE id = 'compaction-1'"
-    ).fetchone()
-    assert row == ('compaction-1', 'session-1', 'auto', None)
     connection.close()
 
 

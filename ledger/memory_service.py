@@ -3,13 +3,15 @@
 Deferred from Microtask 14/15's schema-only work: this module adds the
 retrieval and lifecycle-transition behavior those schemas support.
 
-The v6 schema does not record which session proposed a candidate memory or
-which project(s) supplied validating evidence, so the deeper §17.4 policy
-checks ("evidence not authored solely by the same session that proposed the
-candidate", "successful evidence from at least two distinct projects") are
-not representable here and are left to a future schema change; this module
-enforces the state-machine legality the diagram in §17.4 defines and the
-evidence linkage §17.3 requires ("All conclusions link to evidence").
+`MEMORY.proposing_session_id` records which session proposed a candidate, so
+`validate_memory` can enforce §17.4's session-independence rule ("evidence
+not authored solely by the same session that proposed the candidate") when
+callers supply the validating session. The schema does not yet record which
+project(s) supplied validating evidence, so the deeper §17.4 policy check
+("successful evidence from at least two distinct projects") remains left to
+a future schema change; this module enforces the state-machine legality the
+diagram in §17.4 defines and the evidence linkage §17.3 requires ("All
+conclusions link to evidence").
 """
 
 import hashlib
@@ -214,8 +216,31 @@ def validate_memory(
     evidence_id: str,
     *,
     updated_at: str,
+    validating_session_id: str | None = None,
 ) -> None:
-    """Transition a Candidate memory to Validated and link its supporting evidence."""
+    """Transition a Candidate memory to Validated and link its supporting evidence.
+
+    When `validating_session_id` is given, refuses the transition if it
+    matches the memory's `proposing_session_id`: SPEC.md §17.4 requires
+    "evidence not authored solely by the same session that proposed the
+    candidate."
+    """
+    if validating_session_id is not None:
+        row = connection.execute(
+            'SELECT proposing_session_id FROM MEMORY WHERE id = ?', (memory_id,)
+        ).fetchone()
+        if row is None:
+            raise MemoryNotFoundError(memory_id)
+        proposing_session_id = row[0]
+        if (
+            proposing_session_id is not None
+            and proposing_session_id == validating_session_id
+        ):
+            raise IllegalMemoryTransitionError(
+                f'{memory_id}: validating session {validating_session_id!r} must '
+                'differ from the proposing session (SPEC.md §17.4)'
+            )
+
     _transition(connection, memory_id, 'Validated', updated_at=updated_at)
 
     def _link(conn: sqlite3.Connection) -> None:

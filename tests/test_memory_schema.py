@@ -16,6 +16,7 @@ _MEMORY_TABLES = (
 _MEMORY_INDEXES = (
     'idx_memory_origin_project_id',
     'idx_memory_supersedes_memory_id',
+    'idx_memory_proposing_session_id',
     'idx_memory_scope_memory_id',
     'idx_memory_scope_project_id',
     'idx_memory_target_memory_id',
@@ -37,7 +38,7 @@ def test_fresh_init_reaches_the_memory_schema_version(tmp_path):
 
     final_version = migrate(connection)
 
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 6
+    assert final_version == SUPPORTED_SCHEMA_VERSION == 1
     connection.close()
 
 

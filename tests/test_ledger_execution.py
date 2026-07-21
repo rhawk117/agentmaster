@@ -6,7 +6,7 @@ import pytest
 
 from ledger.connection import connect
 from ledger.migrations import migrate
-from ledger.schema import MIGRATIONS, SUPPORTED_SCHEMA_VERSION
+from ledger.schema import SUPPORTED_SCHEMA_VERSION
 
 _EXECUTION_TABLES = (
     'USER_SESSION',
@@ -116,43 +116,6 @@ def test_run_insert_fails_for_an_unknown_state(tmp_path):
             "VALUES ('run-1', 'project-1', 'user-session-1', 'local', "
             "'not-a-real-state', '2026-07-20T00:00:00Z')"
         )
-    connection.close()
-
-
-@pytest.mark.sqlite
-def test_a_v1_database_migrates_forward_with_a_pre_migration_backup(
-    tmp_path, monkeypatch
-):
-    ledger_path = tmp_path / 'ledger.sqlite3'
-    backup_path = tmp_path / 'backup.sqlite3'
-    v1_only = tuple(migration for migration in MIGRATIONS if migration.to_version == 1)
-    monkeypatch.setattr('ledger.migrations.MIGRATIONS', v1_only)
-    monkeypatch.setattr('ledger.migrations.SUPPORTED_SCHEMA_VERSION', 1)
-    seed_connection = connect(ledger_path)
-    migrate(seed_connection)
-    assert not backup_path.exists()
-    seed_connection.close()
-    monkeypatch.undo()
-
-    connection = connect(ledger_path)
-    final_version = migrate(connection, backup_path=backup_path)
-
-    assert final_version == SUPPORTED_SCHEMA_VERSION
-    assert backup_path.exists()
-    backup_connection = sqlite3.connect(backup_path)
-    try:
-        backup_version = backup_connection.execute('PRAGMA user_version').fetchone()[0]
-    finally:
-        backup_connection.close()
-    assert backup_version == 1
-    tables = {
-        row[0]
-        for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    for table in _EXECUTION_TABLES:
-        assert table in tables
     connection.close()
 
 

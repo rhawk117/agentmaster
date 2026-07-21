@@ -53,7 +53,25 @@ def _seed_run_and_task(connection):
     connection.commit()
 
 
-def _insert_memory(connection, memory_id, *, state, title='title', content='content'):
+def _seed_agent_session(connection, agent_session_id):
+    connection.execute(
+        'INSERT INTO AGENT_SESSION '
+        '(id, run_id, role, provider, model, state, started_at) '
+        "VALUES (?, 'run-1', 'implementer', 'claude', 'sonnet', 'running', ?)",
+        (agent_session_id, _CREATED_AT),
+    )
+    connection.commit()
+
+
+def _insert_memory(
+    connection,
+    memory_id,
+    *,
+    state,
+    title='title',
+    content='content',
+    proposing_session_id=None,
+):
     if (
         connection.execute("SELECT 1 FROM PROJECT WHERE id = 'project-1'").fetchone()
         is None
@@ -61,9 +79,9 @@ def _insert_memory(connection, memory_id, *, state, title='title', content='cont
         _seed_project(connection)
     connection.execute(
         'INSERT INTO MEMORY '
-        '(id, origin_project_id, state, memory_kind, title, content, created_at, '
-        'updated_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        '(id, origin_project_id, state, memory_kind, title, content, '
+        'proposing_session_id, created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (
             memory_id,
             'project-1',
@@ -71,6 +89,7 @@ def _insert_memory(connection, memory_id, *, state, title='title', content='cont
             'lesson',
             title,
             content,
+            proposing_session_id,
             _CREATED_AT,
             _CREATED_AT,
         ),
@@ -178,6 +197,74 @@ def test_validate_memory_transitions_candidate_to_validated_and_links_evidence(
         "SELECT relation FROM MEMORY_EVIDENCE WHERE memory_id = 'memory-1'"
     ).fetchone()
     assert link == ('validates',)
+
+
+@pytest.mark.sqlite
+def test_validate_memory_refuses_a_validating_session_matching_the_proposer(
+    connection,
+):
+    _seed_agent_session(connection, 'agent-session-1')
+    _insert_memory(
+        connection,
+        'memory-1',
+        state='Candidate',
+        proposing_session_id='agent-session-1',
+    )
+
+    with pytest.raises(IllegalMemoryTransitionError):
+        validate_memory(
+            connection,
+            'memory-1',
+            'evidence-1',
+            updated_at=_CREATED_AT,
+            validating_session_id='agent-session-1',
+        )
+
+    state = connection.execute(
+        "SELECT state FROM MEMORY WHERE id = 'memory-1'"
+    ).fetchone()[0]
+    assert state == 'Candidate'
+
+
+@pytest.mark.sqlite
+def test_validate_memory_accepts_a_validating_session_that_differs_from_the_proposer(
+    connection,
+):
+    _seed_agent_session(connection, 'agent-session-1')
+    _seed_agent_session(connection, 'agent-session-2')
+    _insert_memory(
+        connection,
+        'memory-1',
+        state='Candidate',
+        proposing_session_id='agent-session-1',
+    )
+    connection.execute(
+        'INSERT INTO ARTIFACT '
+        '(id, project_id, sha256, media_type, byte_size, relative_path, retention_class, '
+        'redaction_state, created_at) '
+        "VALUES ('artifact-1', 'project-1', ?, 'text/plain', 1, 'sha256/x', "
+        "'standard', 'redacted', ?)",
+        ('x' * 64, _CREATED_AT),
+    )
+    connection.execute(
+        'INSERT INTO EVIDENCE (id, run_id, artifact_id, evidence_kind, created_at) '
+        "VALUES ('evidence-1', 'run-1', 'artifact-1', 'command-result', ?)",
+        (_CREATED_AT,),
+    )
+    connection.commit()
+
+    validate_memory(
+        connection,
+        'memory-1',
+        'evidence-1',
+        updated_at=_CREATED_AT,
+        validating_session_id='agent-session-2',
+    )
+
+    state = connection.execute(
+        "SELECT state FROM MEMORY WHERE id = 'memory-1'"
+    ).fetchone()[0]
+    assert state == 'Validated'
 
 
 @pytest.mark.sqlite
