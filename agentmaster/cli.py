@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ledger import cli as ledger_cli
+from ledger.artifact_store import ArtifactStore
 from ledger.connection import connect, connect_read_only
 from ledger.context_pack import (
     ContextPackRequest,
@@ -73,6 +74,16 @@ from ledger.retrospective import (
     propose_memory_candidate,
     run_retrospective,
 )
+from ledger.review import (
+    MalformedReviewError,
+    RecordReviewInput,
+    ReviewFindingInput,
+    ReviewResult,
+)
+from ledger.review_gate import (
+    DeliveryAttemptNotFoundError as ReviewDeliveryAttemptNotFoundError,
+)
+from ledger.review_gate import ReviewGateInput, apply_review_result
 from ledger.worth import compute_memory_worth, compute_procedure_worth, compute_run_worth
 
 if TYPE_CHECKING:
@@ -656,6 +667,75 @@ def _cmd_delivery_merge_gate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _read_review_result(args: argparse.Namespace) -> ReviewResult:
+    """Parse a reviewer's SPEC.md §20.3 JSON result from `--result-file` or stdin."""
+    raw = (
+        sys.stdin.read()
+        if args.result_file == '-'
+        else Path(args.result_file).read_text(encoding='utf-8')
+    )
+    parsed = json.loads(raw)
+    findings = tuple(
+        ReviewFindingInput(
+            severity=finding.get('severity'),
+            summary=finding.get('summary'),
+            criterion_id=finding.get('criterion_id'),
+            file_path=finding.get('file_path'),
+            line_no=finding.get('line_no'),
+            evidence_id=finding.get('evidence_id'),
+        )
+        for finding in parsed.get('findings', [])
+    )
+    return ReviewResult(
+        schema_version=parsed.get('schema_version'),
+        reviewed_sha=parsed.get('reviewed_sha'),
+        verdict=parsed.get('verdict'),
+        findings=findings,
+        evidence_gaps=tuple(parsed.get('evidence_gaps', [])),
+        summary=parsed.get('summary', ''),
+    )
+
+
+def _cmd_delivery_record_review(args: argparse.Namespace) -> int:
+    try:
+        result = _read_review_result(args)
+    except (OSError, json.JSONDecodeError) as error:
+        print(f'delivery record-review: {error}', file=sys.stderr)
+        return 1
+
+    connection = connect(Path(args.path))
+    store = ArtifactStore(Path(args.artifact_root))
+    gate_input = ReviewGateInput(
+        run_id=args.run_id,
+        review_input=RecordReviewInput(
+            review_id=str(uuid.uuid4()),
+            delivery_attempt_id=args.delivery_attempt_id,
+            reviewer_session_id=args.reviewer_session_id,
+            project_id=args.project_id,
+            now=_now(),
+            id_factory=lambda: str(uuid.uuid4()),
+        ),
+        transition=RunTransitionInput(now=_now(), id_factory=lambda: str(uuid.uuid4())),
+    )
+    try:
+        outcome = apply_review_result(connection, store, gate_input, result)
+    except (MalformedReviewError, ReviewDeliveryAttemptNotFoundError) as error:
+        print(f'delivery record-review: {error}', file=sys.stderr)
+        return 1
+    finally:
+        connection.close()
+
+    _emit(
+        json_output=args.json_output,
+        payload=asdict(outcome),
+        text_lines=[
+            f'{outcome.outcome} [{outcome.run_state}] review={outcome.review_id}',
+            *outcome.unresolved_blockers,
+        ],
+    )
+    return 0 if outcome.outcome == 'good' else 1
+
+
 # --- retro group --------------------------------------------------------------
 
 
@@ -1008,11 +1088,22 @@ def _build_delivery_subparser(sub: argparse._SubParsersAction) -> dict[str, Call
     merge_gate_cmd.add_argument('--required-check', action='append', default=[])
     _add_publication_arguments(merge_gate_cmd)
 
+    record_review_cmd = delivery_sub.add_parser('record-review')
+    _add_path_argument(record_review_cmd)
+    _add_json_argument(record_review_cmd)
+    record_review_cmd.add_argument('--artifact-root', required=True)
+    record_review_cmd.add_argument('--run-id', required=True)
+    record_review_cmd.add_argument('--delivery-attempt-id', required=True)
+    record_review_cmd.add_argument('--reviewer-session-id', required=True)
+    record_review_cmd.add_argument('--project-id', required=True)
+    record_review_cmd.add_argument('--result-file', default='-')
+
     return {
         'prepare-pr': _cmd_delivery_prepare_pr,
         'watch-ci': _cmd_delivery_watch_ci,
         'review-gate': _cmd_delivery_review_gate,
         'merge-gate': _cmd_delivery_merge_gate,
+        'record-review': _cmd_delivery_record_review,
     }
 
 

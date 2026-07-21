@@ -10,6 +10,7 @@ import pytest
 import agentmaster.cli as cli_module
 from agentmaster.cli import main
 from ledger.connection import connect
+from ledger.delivery import DeliveryAttemptInput, record_delivery_attempt
 from ledger.git_publisher import CreatePullRequestInput, PullRequestRef
 from ledger.orchestrator_state import RunTransitionInput, transition_run
 from tests.conftest import LEDGER_SEED_CREATED_AT, seed_project_run_task
@@ -350,3 +351,145 @@ def test_merge_gate_merges_when_pr_ci_and_review_heads_match(
     connection.close()
     assert state == 'merged'
     assert run_state == 'Merged'
+
+
+@pytest.fixture
+def run_reviewing(ledger_path, run_at_ci_pending):
+    connection = connect(ledger_path)
+    for state in ('ReviewRequired', 'Reviewing'):
+        transition_run(
+            connection,
+            run_at_ci_pending,
+            state,
+            RunTransitionInput(
+                now=LEDGER_SEED_CREATED_AT, id_factory=lambda: str(uuid.uuid4())
+            ),
+        )
+    head_sha = 'a' * 40
+    delivery = DeliveryAttemptInput(
+        id=str(uuid.uuid4()),
+        run_id=run_at_ci_pending,
+        branch='feat/example',
+        base_sha='0' * 40,
+        head_sha=head_sha,
+        created_at=LEDGER_SEED_CREATED_AT,
+    )
+    record_delivery_attempt(connection, delivery)
+    reviewer_session_id = str(uuid.uuid4())
+    connection.execute(
+        'INSERT INTO AGENT_SESSION '
+        '(id, run_id, role, provider, model, state, started_at) '
+        "VALUES (?, ?, 'reviewer', 'claude', 'opus', 'active', ?)",
+        (reviewer_session_id, run_at_ci_pending, LEDGER_SEED_CREATED_AT),
+    )
+    connection.commit()
+    connection.close()
+    return run_at_ci_pending, delivery.id, reviewer_session_id, head_sha
+
+
+def _write_review_result(tmp_path, **overrides):
+    payload = {
+        'schema_version': 1,
+        'reviewed_sha': 'a' * 40,
+        'verdict': 'GOOD',
+        'findings': [],
+        'evidence_gaps': [],
+        'summary': 'looks good',
+        **overrides,
+    }
+    result_path = tmp_path / 'review-result.json'
+    result_path.write_text(json.dumps(payload), encoding='utf-8')
+    return result_path
+
+
+@pytest.mark.sqlite
+def test_record_review_good_persists_and_advances_run_to_merge_pending(
+    capsys, tmp_path, ledger_path, run_reviewing
+):
+    run_id, delivery_attempt_id, reviewer_session_id, head_sha = run_reviewing
+    result_path = _write_review_result(tmp_path, reviewed_sha=head_sha, verdict='GOOD')
+
+    exit_code = main([
+        'delivery',
+        'record-review',
+        '--path',
+        str(ledger_path),
+        '--artifact-root',
+        str(tmp_path / 'artifacts'),
+        '--run-id',
+        run_id,
+        '--delivery-attempt-id',
+        delivery_attempt_id,
+        '--reviewer-session-id',
+        reviewer_session_id,
+        '--project-id',
+        'project-1',
+        '--result-file',
+        str(result_path),
+        '--json',
+    ])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['outcome'] == 'good'
+    assert payload['run_state'] == 'MergePending'
+    connection = connect(ledger_path)
+    review_row = connection.execute(
+        'SELECT verdict, reviewed_sha FROM REVIEW WHERE id = ?', (payload['review_id'],)
+    ).fetchone()
+    run_state = connection.execute(
+        'SELECT state FROM RUN WHERE id = ?', (run_id,)
+    ).fetchone()[0]
+    connection.close()
+    assert review_row == ('GOOD', head_sha)
+    assert run_state == 'MergePending'
+
+
+@pytest.mark.sqlite
+def test_record_review_needs_fixes_persists_findings_and_blocks_the_run(
+    capsys, tmp_path, ledger_path, run_reviewing
+):
+    run_id, delivery_attempt_id, reviewer_session_id, head_sha = run_reviewing
+    result_path = _write_review_result(
+        tmp_path,
+        reviewed_sha=head_sha,
+        verdict='NEEDS_FIXES',
+        findings=[{'severity': 'blocker', 'summary': 'missing null check'}],
+    )
+
+    exit_code = main([
+        'delivery',
+        'record-review',
+        '--path',
+        str(ledger_path),
+        '--artifact-root',
+        str(tmp_path / 'artifacts'),
+        '--run-id',
+        run_id,
+        '--delivery-attempt-id',
+        delivery_attempt_id,
+        '--reviewer-session-id',
+        reviewer_session_id,
+        '--project-id',
+        'project-1',
+        '--result-file',
+        str(result_path),
+        '--json',
+    ])
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['outcome'] == 'needs_fixes'
+    assert payload['run_state'] == 'FixesRequired'
+    assert payload['unresolved_blockers'] == ['missing null check']
+    connection = connect(ledger_path)
+    finding_rows = connection.execute(
+        'SELECT summary, state FROM REVIEW_FINDING WHERE review_id = ?',
+        (payload['review_id'],),
+    ).fetchall()
+    run_state = connection.execute(
+        'SELECT state FROM RUN WHERE id = ?', (run_id,)
+    ).fetchone()[0]
+    connection.close()
+    assert finding_rows == [('missing null check', 'accepted')]
+    assert run_state == 'FixesRequired'
