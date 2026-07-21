@@ -746,3 +746,11 @@ SELECT a.id AS artifact_id, a.project_id, a.retention_class, a.redaction_state,
 FROM ARTIFACT a
 WHERE a.expires_at IS NOT NULL
   AND a.expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+
+-- v_run_feedback: FEEDBACK rows for the retrospective loop's read-only
+-- consumption (§18, §23 T26) -- the retrospective capability never reads
+-- FEEDBACK directly.
+CREATE VIEW v_run_feedback AS
+SELECT f.id AS feedback_id, f.user_session_id, f.run_id, f.task_id, f.memory_id,
+       f.rating, f.comment, f.created_at
+FROM FEEDBACK f;

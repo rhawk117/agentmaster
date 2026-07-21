@@ -160,6 +160,27 @@ def test_gather_observations_includes_unresolved_review_findings(
     assert quality[0].counterfactual is not None
 
 
+@pytest.mark.sqlite
+def test_gather_observations_includes_feedback(ledger_connection, tmp_path):
+    seed = seed_project_run_task(ledger_connection)
+    ledger_connection.execute(
+        'INSERT INTO FEEDBACK (id, user_session_id, run_id, rating, comment, created_at) '
+        "VALUES ('feedback-1', ?, ?, 1, 'nice work', ?)",
+        (seed.user_session_id, seed.run_id, _CREATED_AT),
+    )
+    ledger_connection.commit()
+
+    read_connection = _read_only(tmp_path)
+    try:
+        observations = gather_observations(read_connection, seed.run_id)
+    finally:
+        read_connection.close()
+
+    feedback_observations = [o for o in observations if o.observation_kind == 'feedback']
+    assert len(feedback_observations) == 1
+    assert 'nice work' in feedback_observations[0].claim
+
+
 # --- run_retrospective --------------------------------------------------------
 
 

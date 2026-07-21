@@ -39,6 +39,7 @@ from ledger.delivery_gate import (
     evaluate_merge_gate,
 )
 from ledger.feedback import FeedbackInput, UnknownReferenceError, record_feedback
+from ledger.feedback_capture import register_feedback_capture_hook
 from ledger.git_publisher import (
     GhCliClient,
     GitPublisherError,
@@ -659,6 +660,7 @@ def _cmd_delivery_merge_gate(args: argparse.Namespace) -> int:
 
 
 def _cmd_retro_run(args: argparse.Namespace) -> int:
+    register_feedback_capture_hook()
     ledger_path = Path(args.path)
     read_connection = connect_read_only(ledger_path)
     connection = connect(ledger_path)

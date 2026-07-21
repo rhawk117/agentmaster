@@ -5,6 +5,14 @@ and run_id are required, task_id and memory_id are optional, and rating is
 the tri-state integer described in §17.2." Referenced ids are checked before
 the insert so an unknown id raises a clear domain error instead of a raw
 `sqlite3.IntegrityError`.
+
+When `feedback.memory_id` names a memory that was actually retrieved during
+`feedback.run_id` (it has a `memory_access` row for that run), the rating also
+propagates onto that access row's helpful/harmful flags and `MEMORY`'s
+usefulness_count/harmful_count (SPEC.md §17.2: rating "map[s] harmful/neutral/
+helpful directly onto memory_access's helpful/harmful semantics"). A memory_id
+with no matching access row in that run is left untouched: the feedback isn't
+about a memory the run actually used.
 """
 
 from dataclasses import dataclass
@@ -45,6 +53,30 @@ def _require_row(
     ).fetchone()
     if row is None:
         raise UnknownReferenceError(f'{table}.{id_column} = {value!r} does not exist')
+
+
+def _apply_memory_feedback(
+    connection: sqlite3.Connection, *, run_id: str, memory_id: str, rating: int
+) -> None:
+    helpful = 1 if rating == 1 else 0
+    harmful = 1 if rating == -1 else 0
+    cursor = connection.execute(
+        'UPDATE memory_access SET helpful = ?, harmful = ? '
+        'WHERE run_id = ? AND memory_id = ?',
+        (helpful, harmful, run_id, memory_id),
+    )
+    if cursor.rowcount <= 0:
+        return
+    if rating == 1:
+        connection.execute(
+            'UPDATE MEMORY SET usefulness_count = usefulness_count + 1 WHERE id = ?',
+            (memory_id,),
+        )
+    elif rating == -1:
+        connection.execute(
+            'UPDATE MEMORY SET harmful_count = harmful_count + 1 WHERE id = ?',
+            (memory_id,),
+        )
 
 
 def record_feedback(connection: sqlite3.Connection, feedback: FeedbackInput) -> None:
@@ -89,5 +121,12 @@ def record_feedback(connection: sqlite3.Connection, feedback: FeedbackInput) -> 
                 feedback.created_at,
             ),
         )
+        if feedback.memory_id is not None:
+            _apply_memory_feedback(
+                conn,
+                run_id=feedback.run_id,
+                memory_id=feedback.memory_id,
+                rating=feedback.rating,
+            )
 
     run_write_transaction(connection, _insert)
