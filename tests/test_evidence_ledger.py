@@ -29,7 +29,7 @@ def test_fresh_init_reaches_the_evidence_schema_version(tmp_path):
 
     final_version = migrate(connection)
 
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 3
+    assert final_version == SUPPORTED_SCHEMA_VERSION == 4
     connection.close()
 
 
@@ -122,7 +122,7 @@ def test_a_pre_rebuild_compaction_event_row_survives_the_rebuild(tmp_path, monke
     connection = connect(ledger_path)
     final_version = migrate(connection)
 
-    assert final_version == SUPPORTED_SCHEMA_VERSION == 3
+    assert final_version == SUPPORTED_SCHEMA_VERSION == 4
     row = connection.execute(
         'SELECT id, agent_session_id, trigger, snapshot_artifact_id '
         "FROM COMPACTION_EVENT WHERE id = 'compaction-1'"
