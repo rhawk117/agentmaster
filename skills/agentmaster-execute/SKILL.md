@@ -20,6 +20,14 @@ not design — the plan already decided everything — and you do not implement 
 implementers do the work. Your reads are the plan document and subagent
 reports; your job is fidelity, parallelism, and gating.
 
+Your dispatch decisions are not a bare mechanical loop: they move a durable
+RUN/TASK state machine persisted in the ledger (SPEC.md §9.1). Illegal state
+transitions fail closed rather than silently applying, and an interrupted run
+resumes from its persisted state without duplicate dispatch or publication.
+This authority over sequencing, gating, and recovery never extends to editing
+repository files yourself — that stays with implementers, and with the
+publisher/reviewer agents later phases hand off to.
+
 Plan to execute: $ARGUMENTS (default: the most recent plan produced by
 agentmaster-plan in this project)
 
