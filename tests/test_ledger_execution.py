@@ -24,6 +24,7 @@ _EXECUTION_TABLES = (
 _EXECUTION_INDEXES = (
     'idx_user_session_harness_session_id',
     'idx_entrypoint_kind_active',
+    'idx_entrypoint_kind_name',
     'idx_run_project_id',
     'idx_run_user_session_id',
     'idx_run_parent_run_id',
