@@ -34,6 +34,19 @@ def main() -> int:
             copy(p, dst / p.name)
         ctx = hooklib.compaction_context(payload)
         hooklib.append_telemetry(payload, f'precompact:{ctx.agent_type}', ctx.token_count)
+        hooklib.spool_event(
+            payload,
+            {
+                'kind': 'compaction',
+                'cwd': str(hooklib.workspace(payload)),
+                'agent_type': ctx.agent_type,
+                'trigger': ctx.trigger,
+                'token_count': int(ctx.token_count)
+                if ctx.token_count.isdigit()
+                else None,
+                'snapshot_dir': str(dst),
+            },
+        )
     return 0
 
 

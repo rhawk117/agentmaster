@@ -25,6 +25,8 @@ from ledger.context_pack import (
     build_context_pack,
 )
 from ledger.feedback import FeedbackInput, UnknownReferenceError, record_feedback
+from ledger.ingestion import ingest_pending_events
+from ledger.legacy_migration import import_legacy_workspace
 from ledger.memory_service import (
     IllegalMemoryTransitionError,
     MemoryAccessLog,
@@ -38,7 +40,7 @@ from ledger.memory_service import (
     supersede_memory,
     validate_memory,
 )
-from ledger.queries import query_entrypoints
+from ledger.queries import query_entrypoints, query_runs, query_tokens
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -117,6 +119,121 @@ def _cmd_ledger_query_entrypoints(args: argparse.Namespace) -> int:
         payload=[asdict(row) for row in rows],
         text_lines=text_lines,
     )
+    return 0
+
+
+def _cmd_ledger_query_runs(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    try:
+        rows = query_runs(connection)
+    finally:
+        connection.close()
+    text_lines = (
+        ['no runs recorded']
+        if not rows
+        else [
+            f'{row.run_id} [{row.state}] {row.delivery_mode} '
+            f'tasks={row.completed_task_count}/{row.task_count}'
+            for row in rows
+        ]
+    )
+    _emit(
+        json_output=args.json_output,
+        payload=[asdict(row) for row in rows],
+        text_lines=text_lines,
+    )
+    return 0
+
+
+def _cmd_ledger_query_tokens(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    try:
+        rows = query_tokens(connection, run_id=args.run_id)
+    finally:
+        connection.close()
+    text_lines = (
+        ['no token usage recorded']
+        if not rows
+        else [
+            f'{row.run_id} {row.model} calls={row.call_count} '
+            f'input={row.input_tokens} output={row.output_tokens}'
+            for row in rows
+        ]
+    )
+    _emit(
+        json_output=args.json_output,
+        payload=[asdict(row) for row in rows],
+        text_lines=text_lines,
+    )
+    return 0
+
+
+def _cmd_ledger_query(args: argparse.Namespace) -> int:
+    if args.query_target == 'runs':
+        return _cmd_ledger_query_runs(args)
+    if args.query_target == 'tokens':
+        return _cmd_ledger_query_tokens(args)
+    return _cmd_ledger_query_entrypoints(args)
+
+
+def _cmd_ledger_ingest_events(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    try:
+        report = ingest_pending_events(
+            connection,
+            Path(args.spool),
+            id_factory=lambda: str(uuid.uuid4()),
+            now=_now,
+        )
+    finally:
+        connection.close()
+    _emit(
+        json_output=args.json_output,
+        payload=asdict(report),
+        text_lines=[
+            f'ingested={report.ingested} malformed={report.malformed} '
+            f'unsupported={report.unsupported} failed={report.failed}'
+        ],
+    )
+    return 0
+
+
+# --- migrate group -----------------------------------------------------------
+
+
+def _cmd_migrate_legacy_files(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    try:
+        reports = import_legacy_workspace(
+            connection,
+            Path(args.workspace),
+            id_factory=lambda: str(uuid.uuid4()),
+            now=_now,
+            apply=not args.dry_run,
+        )
+    finally:
+        connection.close()
+    payload = [
+        {
+            'source': str(report.source),
+            'imported': report.imported,
+            'ambiguous': report.ambiguous,
+            'malformed': report.malformed,
+            'redacted': report.redacted,
+            'artifact_id': report.artifact_id,
+        }
+        for report in reports
+    ]
+    text_lines = (
+        ['no legacy telemetry files found']
+        if not reports
+        else [
+            f'{report.source}: imported={report.imported} ambiguous={report.ambiguous} '
+            f'malformed={report.malformed} redacted={report.redacted}'
+            for report in reports
+        ]
+    )
+    _emit(json_output=args.json_output, payload=payload, text_lines=text_lines)
     return 0
 
 
@@ -315,6 +432,18 @@ def _build_ledger_subparser(sub: argparse._SubParsersAction) -> dict[str, Callab
     entrypoints_cmd = query_sub.add_parser('entrypoints')
     _add_path_argument(entrypoints_cmd)
     _add_json_argument(entrypoints_cmd)
+    runs_cmd = query_sub.add_parser('runs')
+    _add_path_argument(runs_cmd)
+    _add_json_argument(runs_cmd)
+    tokens_cmd = query_sub.add_parser('tokens')
+    _add_path_argument(tokens_cmd)
+    _add_json_argument(tokens_cmd)
+    tokens_cmd.add_argument('--run-id', default=None)
+
+    ingest_events_cmd = ledger_sub.add_parser('ingest-events')
+    _add_path_argument(ingest_events_cmd)
+    _add_json_argument(ingest_events_cmd)
+    ingest_events_cmd.add_argument('--spool', required=True)
 
     return {
         'init': _cmd_ledger_init,
@@ -322,7 +451,8 @@ def _build_ledger_subparser(sub: argparse._SubParsersAction) -> dict[str, Callab
         'backup': _cmd_ledger_backup,
         'doctor': _cmd_ledger_doctor,
         'record-feedback': _cmd_ledger_record_feedback,
-        'query': _cmd_ledger_query_entrypoints,
+        'query': _cmd_ledger_query,
+        'ingest-events': _cmd_ledger_ingest_events,
     }
 
 
@@ -379,6 +509,19 @@ def _build_memory_subparser(sub: argparse._SubParsersAction) -> dict[str, Callab
     }
 
 
+def _build_migrate_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
+    migrate_parser = sub.add_parser('migrate')
+    migrate_sub = migrate_parser.add_subparsers(dest='command', required=True)
+
+    legacy_files_cmd = migrate_sub.add_parser('legacy-files')
+    _add_path_argument(legacy_files_cmd)
+    _add_json_argument(legacy_files_cmd)
+    legacy_files_cmd.add_argument('--workspace', required=True)
+    legacy_files_cmd.add_argument('--dry-run', action='store_true')
+
+    return {'legacy-files': _cmd_migrate_legacy_files}
+
+
 def _build_context_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
     context_parser = sub.add_parser('context')
     context_sub = context_parser.add_subparsers(dest='command', required=True)
@@ -403,6 +546,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, dict[str, Callab
         'ledger': _build_ledger_subparser(sub),
         'memory': _build_memory_subparser(sub),
         'context': _build_context_subparser(sub),
+        'migrate': _build_migrate_subparser(sub),
     }
     return parser, groups
 

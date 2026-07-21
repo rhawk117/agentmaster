@@ -82,6 +82,108 @@ def test_ledger_query_entrypoints_on_a_fresh_ledger_reports_empty(capsys, ledger
 
 
 @pytest.mark.sqlite
+def test_ledger_query_runs_on_a_fresh_ledger_reports_empty(capsys, ledger_path):
+    exit_code = main(['ledger', 'query', 'runs', '--path', str(ledger_path), '--json'])
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+
+@pytest.mark.sqlite
+def test_ledger_query_tokens_on_a_fresh_ledger_reports_empty(capsys, ledger_path):
+    exit_code = main(['ledger', 'query', 'tokens', '--path', str(ledger_path), '--json'])
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+
+@pytest.mark.sqlite
+def test_ledger_ingest_events_drains_the_spool(capsys, tmp_path, ledger_path):
+    spool = tmp_path / 'events'
+    spool.mkdir()
+    (spool / '1.json').write_text(
+        json.dumps({
+            'schema_version': 1,
+            'kind': 'agent_session',
+            'harness_session_id': 'harness-1',
+            'cwd': '/repo',
+            'agent_id': 'agent-1',
+            'role': 'scout',
+            'model': 'haiku',
+            'total_tokens': 5,
+            'duration_ms': 10,
+        }),
+        encoding='utf-8',
+    )
+
+    exit_code = main([
+        'ledger',
+        'ingest-events',
+        '--path',
+        str(ledger_path),
+        '--spool',
+        str(spool),
+        '--json',
+    ])
+
+    assert exit_code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report == {'ingested': 1, 'malformed': 0, 'unsupported': 0, 'failed': 0}
+    assert list(spool.glob('*.json')) == []
+
+    connection = connect(ledger_path)
+    run_count = connection.execute('SELECT COUNT(*) FROM RUN').fetchone()[0]
+    connection.close()
+    assert run_count == 1
+
+
+@pytest.mark.sqlite
+def test_migrate_legacy_files_dry_run_then_apply(capsys, tmp_path, ledger_path):
+    workspace = tmp_path / 'workspace'
+    am = workspace / '.agentmaster'
+    am.mkdir(parents=True)
+    (am / 'telemetry.md').write_text('hook,scout,haiku,42,100\n')
+
+    exit_code = main([
+        'migrate',
+        'legacy-files',
+        '--path',
+        str(ledger_path),
+        '--workspace',
+        str(workspace),
+        '--dry-run',
+        '--json',
+    ])
+    assert exit_code == 0
+    dry_run_report = json.loads(capsys.readouterr().out)
+    assert dry_run_report[0]['imported'] == 1
+    assert dry_run_report[0]['artifact_id'] is None
+
+    connection = connect(ledger_path)
+    assert connection.execute('SELECT COUNT(*) FROM RUN').fetchone()[0] == 0
+    connection.close()
+
+    exit_code = main([
+        'migrate',
+        'legacy-files',
+        '--path',
+        str(ledger_path),
+        '--workspace',
+        str(workspace),
+        '--json',
+    ])
+    assert exit_code == 0
+    apply_report = json.loads(capsys.readouterr().out)
+    assert apply_report[0]['imported'] == 1
+    assert apply_report[0]['artifact_id'] is not None
+
+    connection = connect(ledger_path)
+    assert connection.execute('SELECT COUNT(*) FROM MODEL_CALL').fetchone()[0] == 1
+    connection.close()
+    assert (am / 'telemetry.md').is_file()
+
+
+@pytest.mark.sqlite
 def test_memory_lifecycle_via_cli(capsys, ledger_path):
     connection = connect(ledger_path)
     seed_project_run_task(connection)

@@ -47,6 +47,26 @@ COMMAND_REGISTRY: tuple[CommandEntry, ...] = (
         description='List ENTRYPOINT rows.',
     ),
     CommandEntry(
+        group='ledger',
+        name='query-runs',
+        description='List RUN rows via v_run_summary.',
+    ),
+    CommandEntry(
+        group='ledger',
+        name='query-tokens',
+        description='List per-run, per-model token totals.',
+    ),
+    CommandEntry(
+        group='ledger',
+        name='ingest-events',
+        description='Drain the spooled hook-event queue into ledger rows.',
+    ),
+    CommandEntry(
+        group='migrate',
+        name='legacy-files',
+        description='One-shot import of pre-v2 Agentmaster artifacts into the ledger.',
+    ),
+    CommandEntry(
         group='memory',
         name='search',
         description='Search active/validated memories by full-text query.',

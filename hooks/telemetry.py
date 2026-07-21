@@ -54,6 +54,20 @@ def _consume_start(sdir: Path, legacy_dir: Path, aid: str) -> str:
     return ''
 
 
+def _to_int(value: str | int) -> int | None:
+    """Return `value` as a non-negative int, or `None` when absent/unparseable.
+
+    Never fabricates a token/duration value (SPEC.md §16.3): an empty
+    string or a value that isn't a real non-negative integer becomes NULL
+    rather than 0 or a guess.
+    """
+    try:
+        parsed = int(value)
+    except TypeError, ValueError:
+        return None
+    return parsed if parsed >= 0 else None
+
+
 def main() -> int:
     payload = hooklib.read_payload()
     sdir = hooklib.session_dir(payload)
@@ -75,6 +89,18 @@ def main() -> int:
         _consume_start(sdir, hooklib.agentmaster_dir(payload), aid) if aid else ''
     )
     hooklib.append_telemetry(payload, agent, tokens, duration_ms, model)
+    hooklib.spool_event(
+        payload,
+        {
+            'kind': 'agent_session',
+            'cwd': str(hooklib.workspace(payload)),
+            'agent_id': aid,
+            'role': agent,
+            'model': model,
+            'total_tokens': _to_int(tokens),
+            'duration_ms': _to_int(duration_ms),
+        },
+    )
     return 0
 
 

@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -170,3 +171,48 @@ def test_compaction_context_fails_open_on_malformed_values():
 
     ctx = hooklib.compaction_context({'agent_type': Boom()})
     assert ctx.agent_type == 'main'
+
+
+def test_spool_event_writes_one_json_file(tmp_path):
+    payload = {'cwd': str(tmp_path), 'session_id': 'sess-1'}
+    hooklib.spool_event(payload, {'kind': 'agent_session', 'model': 'sonnet'})
+
+    files = list((tmp_path / '.agentmaster' / 'events').glob('*.json'))
+    assert len(files) == 1
+    record = json.loads(files[0].read_text())
+    assert record == {
+        'schema_version': 1,
+        'harness_session_id': 'sess-1',
+        'kind': 'agent_session',
+        'model': 'sonnet',
+    }
+
+
+def test_spool_event_defaults_session_id_when_absent(tmp_path):
+    payload = {'cwd': str(tmp_path)}
+    hooklib.spool_event(payload, {'kind': 'compaction'})
+
+    files = list((tmp_path / '.agentmaster' / 'events').glob('*.json'))
+    record = json.loads(files[0].read_text())
+    assert record['harness_session_id'] == 'default'
+
+
+def test_spool_event_two_calls_never_collide(tmp_path):
+    payload = {'cwd': str(tmp_path), 'session_id': 'sess-1'}
+    hooklib.spool_event(payload, {'kind': 'agent_session', 'n': 1})
+    hooklib.spool_event(payload, {'kind': 'agent_session', 'n': 2})
+
+    files = list((tmp_path / '.agentmaster' / 'events').glob('*.json'))
+    assert len(files) == 2
+
+
+def test_spool_event_fails_open_on_unwritable_events_dir(tmp_path):
+    payload = {'cwd': str(tmp_path), 'session_id': 'sess-1'}
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    events = am / 'events'
+    events.write_text('not a directory')
+
+    hooklib.spool_event(payload, {'kind': 'agent_session'})  # must not raise
+
+    assert events.is_file()

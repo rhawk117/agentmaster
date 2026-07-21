@@ -81,6 +81,43 @@ def test_telemetry_finds_transcript_in_session_dir(tmp_path, run_hook):
     assert line.startswith('hook,scout,claude-haiku-4-5,10,')
 
 
+def test_telemetry_spools_an_agent_session_event(tmp_path, run_hook):
+    payload = {
+        'cwd': str(tmp_path),
+        'agent_type': 'scout',
+        'agent_id': 'abc',
+        'total_tokens': 42,
+    }
+    result = run_hook('telemetry', payload)
+    assert result.returncode == 0
+    files = list((tmp_path / '.agentmaster' / 'events').glob('*.json'))
+    assert len(files) == 1
+    record = json.loads(files[0].read_text())
+    assert record['kind'] == 'agent_session'
+    assert record['agent_id'] == 'abc'
+    assert record['role'] == 'scout'
+    assert record['total_tokens'] == 42
+
+
+def test_telemetry_spools_no_tokens_as_null_not_zero(tmp_path, run_hook):
+    payload = {'cwd': str(tmp_path), 'agent_type': 'scout', 'agent_id': 'abc'}
+    result = run_hook('telemetry', payload)
+    assert result.returncode == 0
+    files = list((tmp_path / '.agentmaster' / 'events').glob('*.json'))
+    record = json.loads(files[0].read_text())
+    assert record['total_tokens'] is None
+
+
+def test_telemetry_fails_open_when_events_dir_is_unwritable(tmp_path, run_hook):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'events').write_text('not a directory')
+    payload = {'cwd': str(tmp_path), 'agent_type': 'scout', 'agent_id': 'abc'}
+    result = run_hook('telemetry', payload)
+    assert result.returncode == 0
+    assert (am / 'sessions' / 'default' / 'telemetry.md').is_file()
+
+
 def test_subagent_start_records_timestamp(tmp_path, run_hook):
     payload = {'cwd': str(tmp_path), 'agent_id': 'xyz'}
     result = run_hook('subagent_start', payload)
@@ -132,6 +169,34 @@ def test_precompact_snapshot_two_calls_never_collide(tmp_path, run_hook):
         assert (snap / 'ledger.md').read_text() == 'evidence'
     telemetry = (am / 'sessions' / 'default' / 'telemetry.md').read_text()
     assert len(telemetry.splitlines()) == 2
+
+
+def test_precompact_snapshot_spools_a_compaction_event(tmp_path, run_hook):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'ledger.md').write_text('evidence')
+    payload = {'cwd': str(tmp_path), 'agent_type': 'implementer', 'token_count': 12345}
+    result = run_hook('precompact_snapshot', payload)
+    assert result.returncode == 0
+    files = list((am / 'events').glob('*.json'))
+    assert len(files) == 1
+    record = json.loads(files[0].read_text())
+    assert record['kind'] == 'compaction'
+    assert record['agent_type'] == 'implementer'
+    assert record['token_count'] == 12345
+    assert (am / 'compaction-snapshots').is_dir()
+    assert record['snapshot_dir'] == str(next((am / 'compaction-snapshots').iterdir()))
+
+
+def test_precompact_snapshot_fails_open_when_events_dir_is_unwritable(tmp_path, run_hook):
+    am = tmp_path / '.agentmaster'
+    am.mkdir()
+    (am / 'ledger.md').write_text('evidence')
+    (am / 'events').write_text('not a directory')
+    payload = {'cwd': str(tmp_path)}
+    result = run_hook('precompact_snapshot', payload)
+    assert result.returncode == 0
+    assert (am / 'sessions' / 'default' / 'telemetry.md').is_file()
 
 
 def test_precompact_snapshot_writes_debug_dump_when_enabled(tmp_path, run_hook):
