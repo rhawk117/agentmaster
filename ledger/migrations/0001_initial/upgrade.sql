@@ -73,6 +73,7 @@ CREATE TABLE RUN (
         'MergePending', 'Merged', 'RetrospectivePending', 'Complete',
         'Blocked', 'Failed', 'Cancelled'
     )),
+    blocked_reason TEXT,
     base_sha TEXT,
     head_sha TEXT,
     started_at TEXT NOT NULL,
@@ -87,6 +88,12 @@ CREATE INDEX idx_run_state ON RUN(state);
 CREATE INDEX idx_run_started_at ON RUN(started_at);
 
 -- TASK: one unit of work within a run's task graph (§9, §17.1).
+-- `lease_agent_session_id`/`lease_acquired_at` record the running dispatch
+-- lease a task currently holds (§9, §23 M19: "running leases"); recovery
+-- reconciles a lease left behind by a killed process. `blocked_reason` and
+-- `required_evidence_json` back the same microtask's "blocked reasons" and
+-- "required evidence" tracking without pre-empting Microtask 20's full
+-- evidence-sufficiency engine.
 CREATE TABLE TASK (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES RUN(id),
@@ -97,6 +104,10 @@ CREATE TABLE TASK (
     risk_level TEXT,
     sequence_no INTEGER NOT NULL,
     acceptance_json TEXT,
+    required_evidence_json TEXT,
+    blocked_reason TEXT,
+    lease_agent_session_id TEXT REFERENCES AGENT_SESSION(id),
+    lease_acquired_at TEXT,
     started_at TEXT,
     ended_at TEXT
 );
@@ -105,6 +116,7 @@ CREATE INDEX idx_task_run_id ON TASK(run_id);
 CREATE INDEX idx_task_parent_task_id ON TASK(parent_task_id);
 CREATE INDEX idx_task_state ON TASK(state);
 CREATE INDEX idx_task_started_at ON TASK(started_at);
+CREATE INDEX idx_task_lease_agent_session_id ON TASK(lease_agent_session_id);
 
 -- TASK_DEPENDENCY: a task's ordering/blocking dependency on another task (§17.1).
 CREATE TABLE TASK_DEPENDENCY (
@@ -117,6 +129,47 @@ CREATE TABLE TASK_DEPENDENCY (
 CREATE INDEX idx_task_dependency_task_id ON TASK_DEPENDENCY(task_id);
 CREATE INDEX idx_task_dependency_depends_on_task_id
     ON TASK_DEPENDENCY(depends_on_task_id);
+
+-- --- run/task state transitions and interruption recovery (§9.1, §23 M19) --
+
+-- RUN_TRANSITION: one legality-checked RUN.state change, append-only.
+CREATE TABLE RUN_TRANSITION (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES RUN(id),
+    from_state TEXT NOT NULL,
+    to_state TEXT NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_run_transition_run_id ON RUN_TRANSITION(run_id);
+
+-- TASK_TRANSITION: one legality-checked TASK.state change, append-only.
+CREATE TABLE TASK_TRANSITION (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES TASK(id),
+    run_id TEXT NOT NULL REFERENCES RUN(id),
+    from_state TEXT NOT NULL,
+    to_state TEXT NOT NULL,
+    reason TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_task_transition_task_id ON TASK_TRANSITION(task_id);
+CREATE INDEX idx_task_transition_run_id ON TASK_TRANSITION(run_id);
+
+-- RECOVERY_EVENT: one decision made reconciling a run after interruption.
+CREATE TABLE RECOVERY_EVENT (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES RUN(id),
+    task_id TEXT REFERENCES TASK(id),
+    decision TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_recovery_event_run_id ON RECOVERY_EVENT(run_id);
+CREATE INDEX idx_recovery_event_task_id ON RECOVERY_EVENT(task_id);
 
 -- --- agent sessions, calls, and events -------------------------------------
 
