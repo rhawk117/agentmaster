@@ -219,6 +219,38 @@ def test_retry_ceiling_fails_the_run_and_surfaces_blockers(
 
 
 @pytest.mark.sqlite
+def test_retry_ceiling_trips_on_exactly_the_max_th_attempt(
+    ledger_connection, store, gated_run
+):
+    """The boundary is exact: MAX_REVIEW_ATTEMPTS - 1 attempts are processed as
+    ordinary NEEDS_FIXES verdicts, and the MAX_REVIEW_ATTEMPTS-th trips the
+    ceiling -- this fails if the boundary moves by one in either direction.
+    """
+    run_id, delivery_attempt_id, reviewer_session_id = gated_run
+    finding = ReviewFindingInput(severity='blocker', summary='still broken')
+
+    for attempt in range(1, MAX_REVIEW_ATTEMPTS):
+        outcome = apply_review_result(
+            ledger_connection,
+            store,
+            _gate_input(run_id, _review_input(delivery_attempt_id, reviewer_session_id)),
+            _result(verdict='NEEDS_FIXES', findings=(finding,)),
+        )
+        assert outcome.outcome == 'needs_fixes', f'attempt {attempt} tripped early'
+        _retry_to_reviewing(ledger_connection, run_id)
+
+    outcome = apply_review_result(
+        ledger_connection,
+        store,
+        _gate_input(run_id, _review_input(delivery_attempt_id, reviewer_session_id)),
+        _result(verdict='NEEDS_FIXES', findings=(finding,)),
+    )
+
+    assert outcome.outcome == 'retry_ceiling_exhausted'
+    assert outcome.run_state == 'Failed'
+
+
+@pytest.mark.sqlite
 def test_a_malformed_result_is_never_recorded_or_applied(
     ledger_connection, store, gated_run
 ):

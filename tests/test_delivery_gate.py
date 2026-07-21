@@ -260,6 +260,30 @@ def test_evaluate_ci_rejects_a_skipped_required_check(ledger_connection, run):
 
 
 @pytest.mark.sqlite
+def test_evaluate_ci_rejects_a_neutral_check(ledger_connection, run):
+    """SPEC.md:1477 requires all required checks 'successful' -- 'neutral' is
+    not green.
+    """
+    delivery_attempt_id = _seed_delivery_attempt(ledger_connection, run_id=run)
+    record_ci_check(
+        ledger_connection,
+        _check(
+            delivery_attempt_id,
+            'build',
+            head_sha=_HEAD_A,
+            status='completed',
+            conclusion='neutral',
+            observed_at=_NOW,
+        ),
+    )
+
+    evaluation = evaluate_ci(ledger_connection, delivery_attempt_id, ('build',))
+
+    assert evaluation.outcome == 'failed'
+    assert "conclusion 'neutral'" in evaluation.blocking_reasons[0]
+
+
+@pytest.mark.sqlite
 def test_evaluate_ci_rejects_ambiguous_conclusions_at_the_same_head_and_time(
     ledger_connection, run
 ):
@@ -497,6 +521,37 @@ def test_merge_gate_blocks_when_ci_has_not_passed_even_with_a_good_review(
 
     assert result.ready is False
     assert any('pending' in reason for reason in result.blocking_reasons)
+
+
+@pytest.mark.sqlite
+def test_merge_gate_blocks_when_ci_concludes_neutral(ledger_connection, run):
+    """SPEC.md:1477 requires all required checks 'successful' -- a 'neutral'
+    conclusion must not permit a merge.
+    """
+    delivery_attempt_id = _seed_delivery_attempt(ledger_connection, run_id=run)
+    reviewer_session_id = _seed_reviewer_session(ledger_connection, run_id=run)
+    record_ci_check(
+        ledger_connection,
+        _check(
+            delivery_attempt_id,
+            'build',
+            head_sha=_HEAD_A,
+            status='completed',
+            conclusion='neutral',
+            observed_at=_NOW,
+        ),
+    )
+    _seed_review(
+        ledger_connection,
+        delivery_attempt_id=delivery_attempt_id,
+        reviewer_session_id=reviewer_session_id,
+        reviewed_sha=_HEAD_A,
+    )
+
+    result = evaluate_merge_gate(ledger_connection, delivery_attempt_id, ('build',))
+
+    assert result.ready is False
+    assert any("conclusion 'neutral'" in reason for reason in result.blocking_reasons)
 
 
 @pytest.mark.sqlite
