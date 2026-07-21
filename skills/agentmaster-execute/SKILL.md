@@ -116,7 +116,9 @@ stops that group there — do not improvise a redesign; surface it with the
 evidence. A group with a failed verification gets one re-dispatch scoped to
 the failing task, with the failure attached; a second failure is surfaced,
 not retried. Implementer reports are claims until re-run: independently re-run at least
-the highest-risk verification of every group via scout dispatches, then run
+the highest-risk verification of every group via scout dispatches — `agentmaster
+context route` computes that risk/ambiguity judgment deterministically, rather
+than leaving "highest-risk" to a vibe — then run
 every task tagged `verification: serialized` in plan order inside a single
 scout dispatch — one dispatch executing the list in sequence, which keeps
 the ordering guarantee without a round trip per task. When all of

@@ -4,9 +4,10 @@ Deferred from Microtask 14/15's schema-only work: this module adds the
 retrieval and lifecycle-transition behavior those schemas support.
 
 `MEMORY.proposing_session_id` records which session proposed a candidate, so
-`validate_memory` can enforce §17.4's session-independence rule ("evidence
-not authored solely by the same session that proposed the candidate") when
-callers supply the validating session. The schema does not yet record which
+`validate_memory` enforces §17.4's session-independence rule ("evidence not
+authored solely by the same session that proposed the candidate"): a
+validating session id is mandatory, with no argument value that skips the
+check. The schema does not yet record which
 project(s) supplied validating evidence, so the deeper §17.4 policy check
 ("successful evidence from at least two distinct projects") remains left to
 a future schema change; this module enforces the state-machine legality the
@@ -216,30 +217,36 @@ def validate_memory(
     evidence_id: str,
     *,
     updated_at: str,
-    validating_session_id: str | None = None,
+    validating_session_id: str | None,
 ) -> None:
     """Transition a Candidate memory to Validated and link its supporting evidence.
 
-    When `validating_session_id` is given, refuses the transition if it
-    matches the memory's `proposing_session_id`: SPEC.md §17.4 requires
-    "evidence not authored solely by the same session that proposed the
-    candidate."
+    Refuses the transition if `validating_session_id` matches the memory's
+    `proposing_session_id`: SPEC.md §17.4 requires "evidence not authored
+    solely by the same session that proposed the candidate." A validating
+    session id is mandatory: passing `None` is rejected with a structured
+    error rather than skipping the check.
+
+    Raises
+    ------
+    IllegalMemoryTransitionError
+        `validating_session_id` is `None`, or matches the proposing session.
     """
-    if validating_session_id is not None:
-        row = connection.execute(
-            'SELECT proposing_session_id FROM MEMORY WHERE id = ?', (memory_id,)
-        ).fetchone()
-        if row is None:
-            raise MemoryNotFoundError(memory_id)
-        proposing_session_id = row[0]
-        if (
-            proposing_session_id is not None
-            and proposing_session_id == validating_session_id
-        ):
-            raise IllegalMemoryTransitionError(
-                f'{memory_id}: validating session {validating_session_id!r} must '
-                'differ from the proposing session (SPEC.md §17.4)'
-            )
+    if validating_session_id is None:
+        raise IllegalMemoryTransitionError(
+            f'{memory_id}: a validating session id is required (SPEC.md §17.4)'
+        )
+    row = connection.execute(
+        'SELECT proposing_session_id FROM MEMORY WHERE id = ?', (memory_id,)
+    ).fetchone()
+    if row is None:
+        raise MemoryNotFoundError(memory_id)
+    proposing_session_id = row[0]
+    if proposing_session_id is not None and proposing_session_id == validating_session_id:
+        raise IllegalMemoryTransitionError(
+            f'{memory_id}: validating session {validating_session_id!r} must '
+            'differ from the proposing session (SPEC.md §17.4)'
+        )
 
     _transition(connection, memory_id, 'Validated', updated_at=updated_at)
 

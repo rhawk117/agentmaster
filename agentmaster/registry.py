@@ -98,6 +98,13 @@ COMMAND_REGISTRY: tuple[CommandEntry, ...] = (
         description='Build a bounded, session-scoped context pack.',
     ),
     CommandEntry(
+        group='context',
+        name='route',
+        description=(
+            'Route a task by risk factors and ambiguity to implementer/scout/review.'
+        ),
+    ),
+    CommandEntry(
         group='delivery',
         name='prepare-pr',
         description='Stage, commit, push, and open/reconcile a PR via the git publisher.',
