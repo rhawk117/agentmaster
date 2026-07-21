@@ -4,8 +4,12 @@ import contextlib
 import json
 import os
 import sys
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, NamedTuple
+
+EVENT_SPOOL_SCHEMA_VERSION = 1
 
 
 def read_payload() -> dict[str, Any]:
@@ -130,6 +134,43 @@ def compaction_context(payload: dict[str, Any]) -> CompactionContext:
             session_id=str(payload.get('session_id') or payload.get('agent_id') or ''),
         )
     return CompactionContext('main', '', '', '')
+
+
+def events_dir(payload: dict[str, Any]) -> Path:
+    """Return the pending-ledger-events spool directory, creating it if needed."""
+    d = agentmaster_dir(payload) / 'events'
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def spool_event(payload: dict[str, Any], event: dict[str, Any]) -> None:
+    """Atomically write one normalized event for later bounded ledger ingestion.
+
+    Hook processes never import the `ledger` package: they run standalone,
+    copied without it (SPEC.md §19, §23 Microtask 17), so this writes a
+    small versioned JSON file instead of a database row; `ledger.ingestion`
+    turns it into typed tables in a later, bounded step. `harness_session_id`
+    is `session_id(payload)` so a spooled event lines up with the same
+    session identity `session_dir` already uses for telemetry.md/.starts.
+    Any failure (unwritable path, disk full) is swallowed so a hook never
+    blocks the harness on optional observability (SPEC.md §9, §16.1).
+    """
+    with contextlib.suppress(Exception):
+        events = events_dir(payload)
+        record = {
+            'schema_version': EVENT_SPOOL_SCHEMA_VERSION,
+            'harness_session_id': session_id(payload),
+            **event,
+        }
+        descriptor, tmp_name = tempfile.mkstemp(dir=events, suffix='.json')
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(descriptor, 'w') as f:
+                f.write(json.dumps(record))
+            tmp_path.replace(events / f'{time.time_ns()}-{os.getpid()}.json')
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
 
 def tool_name(payload: dict[str, Any]) -> str:
