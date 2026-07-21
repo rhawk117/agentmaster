@@ -9,6 +9,7 @@ delegates to it and adds the remaining §19 ledger/memory/context verbs.
 import argparse
 import json
 import sys
+import time
 import uuid
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -24,7 +25,29 @@ from ledger.context_pack import (
     TaskNotFoundError,
     build_context_pack,
 )
+from ledger.delivery import (
+    CiCheckInput,
+    DeliveryAttemptInput,
+    record_ci_check,
+    record_delivery_attempt,
+    update_delivery_attempt_head,
+    update_delivery_attempt_state,
+)
+from ledger.delivery_gate import (
+    DeliveryAttemptNotFoundError,
+    advance_on_green_ci,
+    evaluate_merge_gate,
+)
 from ledger.feedback import FeedbackInput, UnknownReferenceError, record_feedback
+from ledger.git_publisher import (
+    GhCliClient,
+    GitPublisherError,
+    MergeRequest,
+    PublicationManifest,
+    PullRequestRef,
+    merge_pull_request,
+    publish,
+)
 from ledger.ingestion import ingest_pending_events
 from ledger.legacy_migration import import_legacy_workspace
 from ledger.memory_service import (
@@ -40,10 +63,14 @@ from ledger.memory_service import (
     supersede_memory,
     validate_memory,
 )
+from ledger.orchestrator_state import RunTransitionInput, transition_run
 from ledger.queries import query_entrypoints, query_runs, query_tokens
 
 if TYPE_CHECKING:
+    import sqlite3
     from collections.abc import Callable
+
+    from ledger.git_publisher import GitHubClient
 
 
 def _now() -> str:
@@ -392,6 +419,234 @@ def _cmd_context_build(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- delivery group ----------------------------------------------------------
+
+
+def _default_github_client(args: argparse.Namespace) -> GitHubClient:
+    """Return the `GitHubClient` a delivery command uses; tests monkeypatch this."""
+    del args
+    return GhCliClient()
+
+
+def _delivery_attempt_row(
+    connection: sqlite3.Connection, delivery_attempt_id: str
+) -> tuple:
+    row = connection.execute(
+        'SELECT run_id, branch, head_sha, pr_number, pr_url FROM DELIVERY_ATTEMPT '
+        'WHERE id = ?',
+        (delivery_attempt_id,),
+    ).fetchone()
+    if row is None:
+        raise DeliveryAttemptNotFoundError(delivery_attempt_id)
+    return row
+
+
+def _cmd_delivery_prepare_pr(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    manifest = PublicationManifest(
+        repo_path=Path(args.repo),
+        base_branch=args.base_branch,
+        base_sha=args.base_sha,
+        feature_branch=args.feature_branch,
+        allowed_paths=tuple(args.allowed_path),
+        commit_message=args.commit_message,
+        pr_title=args.pr_title,
+        pr_body=args.pr_body,
+        expected_dirty_paths=tuple(args.expected_dirty_path),
+        evidence_links=tuple(args.evidence_link),
+        reviewers=tuple(args.reviewer),
+        merge_strategy=args.merge_strategy,
+        delete_branch_on_merge=not args.no_delete_branch,
+    )
+    try:
+        result = publish(manifest, _default_github_client(args))
+    except GitPublisherError as error:
+        print(f'delivery prepare-pr: {error}', file=sys.stderr)
+        return 1
+    finally:
+        connection.close()
+
+    connection = connect(Path(args.path))
+    try:
+        delivery = DeliveryAttemptInput(
+            id=str(uuid.uuid4()),
+            run_id=args.run_id,
+            branch=manifest.feature_branch,
+            base_sha=manifest.base_sha,
+            head_sha=result.head_sha,
+            created_at=_now(),
+            pr_number=result.pull_request.number,
+            pr_url=result.pull_request.url,
+            state='merged' if result.already_merged else 'open',
+        )
+        attempt_no = record_delivery_attempt(connection, delivery)
+    finally:
+        connection.close()
+
+    payload = {
+        'delivery_attempt_id': delivery.id,
+        'attempt_no': attempt_no,
+        'head_sha': result.head_sha,
+        'pr_number': result.pull_request.number,
+        'pr_url': result.pull_request.url,
+        'reused_existing_pr': result.reused_existing_pr,
+        'already_merged': result.already_merged,
+    }
+    _emit(
+        json_output=args.json_output,
+        payload=payload,
+        text_lines=[
+            f'{delivery.id} attempt#{attempt_no} PR #{result.pull_request.number} '
+            f'{result.pull_request.url} head={result.head_sha}'
+        ],
+    )
+    return 0
+
+
+def _cmd_delivery_watch_ci(args: argparse.Namespace) -> int:
+    if args.max_attempts < 1:
+        print('delivery watch-ci: --max-attempts must be >= 1', file=sys.stderr)
+        return 1
+    connection = connect(Path(args.path))
+    try:
+        run_id, branch, head_sha, _pr_number, _pr_url = _delivery_attempt_row(
+            connection, args.delivery_attempt_id
+        )
+        required_checks = tuple(args.required_check)
+        github = _default_github_client(args)
+        evaluation = None
+        for attempt in range(args.max_attempts):
+            live_pr = github.find_pull_request(
+                repo_path=Path(args.repo), head_branch=branch
+            )
+            if live_pr is not None and live_pr.head_sha != head_sha:
+                head_sha = live_pr.head_sha
+                update_delivery_attempt_head(
+                    connection, args.delivery_attempt_id, head_sha
+                )
+            for observation in github.list_check_runs(
+                repo_path=Path(args.repo), head_sha=head_sha
+            ):
+                record_ci_check(
+                    connection,
+                    CiCheckInput(
+                        id=str(uuid.uuid4()),
+                        delivery_attempt_id=args.delivery_attempt_id,
+                        name=observation.name,
+                        head_sha=observation.head_sha,
+                        status=observation.status,
+                        conclusion=observation.conclusion,
+                        observed_at=_now(),
+                        provider_check_id=observation.provider_check_id,
+                        url=observation.url,
+                    ),
+                )
+            evaluation = advance_on_green_ci(
+                connection,
+                run_id,
+                args.delivery_attempt_id,
+                required_checks,
+                RunTransitionInput(now=_now(), id_factory=lambda: str(uuid.uuid4())),
+            )
+            if evaluation.outcome != 'pending':
+                break
+            if attempt < args.max_attempts - 1:
+                time.sleep(args.poll_interval_seconds)
+    except KeyboardInterrupt:
+        print('delivery watch-ci: cancelled', file=sys.stderr)
+        return 130
+    finally:
+        connection.close()
+
+    assert evaluation is not None  # guaranteed: max_attempts >= 1, loop always assigns it
+    _emit(
+        json_output=args.json_output,
+        payload=asdict(evaluation),
+        text_lines=[
+            f'{evaluation.outcome} @ {evaluation.head_sha}',
+            *evaluation.blocking_reasons,
+        ],
+    )
+    return {'green': 0, 'failed': 1}.get(evaluation.outcome, 2)
+
+
+def _cmd_delivery_review_gate(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    try:
+        result = evaluate_merge_gate(
+            connection, args.delivery_attempt_id, tuple(args.required_check)
+        )
+    except DeliveryAttemptNotFoundError as error:
+        print(f'delivery review-gate: {error}', file=sys.stderr)
+        return 1
+    finally:
+        connection.close()
+    _emit(
+        json_output=args.json_output,
+        payload=asdict(result),
+        text_lines=[
+            f'{"ready" if result.ready else "blocked"} @ {result.head_sha}',
+            *result.blocking_reasons,
+        ],
+    )
+    return 0 if result.ready else 1
+
+
+def _cmd_delivery_merge_gate(args: argparse.Namespace) -> int:
+    connection = connect(Path(args.path))
+    try:
+        run_id, _branch, _head_sha, pr_number, pr_url = _delivery_attempt_row(
+            connection, args.delivery_attempt_id
+        )
+        result = evaluate_merge_gate(
+            connection, args.delivery_attempt_id, tuple(args.required_check)
+        )
+        if not result.ready:
+            _emit(
+                json_output=args.json_output,
+                payload=asdict(result),
+                text_lines=['blocked', *result.blocking_reasons],
+            )
+            return 1
+
+        github = _default_github_client(args)
+        pull_request = PullRequestRef(
+            number=pr_number, url=pr_url, head_sha=result.head_sha, state='open'
+        )
+        try:
+            merge_pull_request(
+                github,
+                pull_request,
+                MergeRequest(
+                    repo_path=Path(args.repo),
+                    merge_strategy=args.merge_strategy,
+                    delete_branch_on_merge=not args.no_delete_branch,
+                    expected_head_sha=result.head_sha,
+                ),
+            )
+        except GitPublisherError as error:
+            print(f'delivery merge-gate: {error}', file=sys.stderr)
+            return 1
+
+        update_delivery_attempt_state(
+            connection, args.delivery_attempt_id, 'merged', completed_at=_now()
+        )
+        transition_run(
+            connection,
+            run_id,
+            'Merged',
+            RunTransitionInput(now=_now(), id_factory=lambda: str(uuid.uuid4())),
+        )
+    finally:
+        connection.close()
+    _emit(
+        json_output=args.json_output,
+        payload={'merged': True, 'head_sha': result.head_sha},
+        text_lines=[f'merged @ {result.head_sha}'],
+    )
+    return 0
+
+
 # --- argument parsing --------------------------------------------------------
 
 
@@ -539,6 +794,63 @@ def _build_context_subparser(sub: argparse._SubParsersAction) -> dict[str, Calla
     return {'build': _cmd_context_build}
 
 
+def _add_publication_arguments(cmd: argparse.ArgumentParser) -> None:
+    cmd.add_argument('--merge-strategy', default='squash')
+    cmd.add_argument('--no-delete-branch', action='store_true')
+
+
+def _build_delivery_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
+    delivery_parser = sub.add_parser('delivery')
+    delivery_sub = delivery_parser.add_subparsers(dest='command', required=True)
+
+    prepare_pr_cmd = delivery_sub.add_parser('prepare-pr')
+    _add_path_argument(prepare_pr_cmd)
+    _add_json_argument(prepare_pr_cmd)
+    prepare_pr_cmd.add_argument('--run-id', required=True)
+    prepare_pr_cmd.add_argument('--repo', required=True)
+    prepare_pr_cmd.add_argument('--base-branch', required=True)
+    prepare_pr_cmd.add_argument('--base-sha', required=True)
+    prepare_pr_cmd.add_argument('--feature-branch', required=True)
+    prepare_pr_cmd.add_argument('--allowed-path', action='append', required=True)
+    prepare_pr_cmd.add_argument('--expected-dirty-path', action='append', default=[])
+    prepare_pr_cmd.add_argument('--commit-message', required=True)
+    prepare_pr_cmd.add_argument('--pr-title', required=True)
+    prepare_pr_cmd.add_argument('--pr-body', required=True)
+    prepare_pr_cmd.add_argument('--evidence-link', action='append', default=[])
+    prepare_pr_cmd.add_argument('--reviewer', action='append', default=[])
+    _add_publication_arguments(prepare_pr_cmd)
+
+    watch_ci_cmd = delivery_sub.add_parser('watch-ci')
+    _add_path_argument(watch_ci_cmd)
+    _add_json_argument(watch_ci_cmd)
+    watch_ci_cmd.add_argument('--delivery-attempt-id', required=True)
+    watch_ci_cmd.add_argument('--repo', required=True)
+    watch_ci_cmd.add_argument('--required-check', action='append', default=[])
+    watch_ci_cmd.add_argument('--max-attempts', type=int, default=30)
+    watch_ci_cmd.add_argument('--poll-interval-seconds', type=float, default=10.0)
+
+    review_gate_cmd = delivery_sub.add_parser('review-gate')
+    _add_path_argument(review_gate_cmd)
+    _add_json_argument(review_gate_cmd)
+    review_gate_cmd.add_argument('--delivery-attempt-id', required=True)
+    review_gate_cmd.add_argument('--required-check', action='append', default=[])
+
+    merge_gate_cmd = delivery_sub.add_parser('merge-gate')
+    _add_path_argument(merge_gate_cmd)
+    _add_json_argument(merge_gate_cmd)
+    merge_gate_cmd.add_argument('--delivery-attempt-id', required=True)
+    merge_gate_cmd.add_argument('--repo', required=True)
+    merge_gate_cmd.add_argument('--required-check', action='append', default=[])
+    _add_publication_arguments(merge_gate_cmd)
+
+    return {
+        'prepare-pr': _cmd_delivery_prepare_pr,
+        'watch-ci': _cmd_delivery_watch_ci,
+        'review-gate': _cmd_delivery_review_gate,
+        'merge-gate': _cmd_delivery_merge_gate,
+    }
+
+
 def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, dict[str, Callable]]]:
     parser = argparse.ArgumentParser(prog='agentmaster')
     sub = parser.add_subparsers(dest='group', required=True)
@@ -547,6 +859,7 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, dict[str, Callab
         'memory': _build_memory_subparser(sub),
         'context': _build_context_subparser(sub),
         'migrate': _build_migrate_subparser(sub),
+        'delivery': _build_delivery_subparser(sub),
     }
     return parser, groups
 

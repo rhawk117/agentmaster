@@ -8,6 +8,7 @@ import pytest
 from ledger.git_publisher import (
     GitCommandError,
     GitPublisherError,
+    MergeRequest,
     PublicationManifest,
     PullRequestRef,
     merge_pull_request,
@@ -50,6 +51,10 @@ class FakeGitHubClient:
             'body': request.body,
         })
         return ref
+
+    def list_check_runs(self, *, repo_path, head_sha):
+        del repo_path, head_sha
+        return ()
 
     def merge_pull_request(self, *, repo_path, number, strategy, delete_branch):
         del repo_path
@@ -269,7 +274,14 @@ def test_merge_pull_request_refuses_a_head_mismatch(repo):
 
     with pytest.raises(GitPublisherError, match='refusing to merge'):
         merge_pull_request(
-            manifest, github, result.pull_request, expected_head_sha='f' * 40
+            github,
+            result.pull_request,
+            MergeRequest(
+                repo_path=manifest.repo_path,
+                merge_strategy=manifest.merge_strategy,
+                delete_branch_on_merge=manifest.delete_branch_on_merge,
+                expected_head_sha='f' * 40,
+            ),
         )
     assert github.merged == []
 
@@ -283,7 +295,14 @@ def test_merge_pull_request_merges_on_a_matching_head(repo):
     result = publish(manifest, github)
 
     merge_pull_request(
-        manifest, github, result.pull_request, expected_head_sha=result.head_sha
+        github,
+        result.pull_request,
+        MergeRequest(
+            repo_path=manifest.repo_path,
+            merge_strategy=manifest.merge_strategy,
+            delete_branch_on_merge=manifest.delete_branch_on_merge,
+            expected_head_sha=result.head_sha,
+        ),
     )
 
     assert github.merged == [

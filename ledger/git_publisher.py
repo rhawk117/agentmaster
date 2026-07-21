@@ -14,6 +14,7 @@ GitHub; `publish` reconciles an existing branch/PR/merge state on retry
 instead of duplicating work.
 """
 
+import json
 import re
 import shutil
 import subprocess
@@ -85,6 +86,18 @@ class CreatePullRequestInput:
     reviewers: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class CheckRunObservation:
+    """One observed check-run, as `GitHubClient.list_check_runs` reports it."""
+
+    name: str
+    head_sha: str
+    status: str
+    conclusion: str | None
+    provider_check_id: str | None = None
+    url: str | None = None
+
+
 class GitHubClient(Protocol):
     """The GitHub operations a git-publisher call needs; fake this in tests."""
 
@@ -96,6 +109,12 @@ class GitHubClient(Protocol):
 
     def create_pull_request(self, request: CreatePullRequestInput) -> PullRequestRef:
         """Open a new PR and return its reference."""
+        ...
+
+    def list_check_runs(
+        self, *, repo_path: Path, head_sha: str
+    ) -> tuple[CheckRunObservation, ...]:
+        """Return every check-run GitHub currently reports for `head_sha`."""
         ...
 
     def merge_pull_request(
@@ -372,14 +391,20 @@ def publish(manifest: PublicationManifest, github: GitHubClient) -> PublicationR
     )
 
 
+@dataclass(frozen=True, slots=True)
+class MergeRequest:
+    """Everything a `merge_pull_request` call needs besides the client and PR."""
+
+    repo_path: Path
+    merge_strategy: str
+    delete_branch_on_merge: bool
+    expected_head_sha: str
+
+
 def merge_pull_request(
-    manifest: PublicationManifest,
-    github: GitHubClient,
-    pull_request: PullRequestRef,
-    *,
-    expected_head_sha: str,
+    github: GitHubClient, pull_request: PullRequestRef, request: MergeRequest
 ) -> None:
-    """Merge `pull_request`, refusing unless its head is exactly `expected_head_sha`.
+    """Merge `pull_request`, refusing unless its head is exactly the expected SHA.
 
     This is defense-in-depth alongside `ledger.delivery_gate`'s merge gate:
     the publisher itself refuses "to merge a head different from the
@@ -388,16 +413,130 @@ def merge_pull_request(
     Raises
     ------
     GitPublisherError
-        `pull_request.head_sha` does not equal `expected_head_sha`.
+        `pull_request.head_sha` does not equal `request.expected_head_sha`.
     """
-    if pull_request.head_sha != expected_head_sha:
+    if pull_request.head_sha != request.expected_head_sha:
         raise GitPublisherError(
             f'refusing to merge: PR head {pull_request.head_sha!r} != '
-            f'expected {expected_head_sha!r}'
+            f'expected {request.expected_head_sha!r}'
         )
     github.merge_pull_request(
-        repo_path=manifest.repo_path,
+        repo_path=request.repo_path,
         number=pull_request.number,
-        strategy=manifest.merge_strategy,
-        delete_branch=manifest.delete_branch_on_merge,
+        strategy=request.merge_strategy,
+        delete_branch=request.delete_branch_on_merge,
     )
+
+
+# GitHub check-run states that are not yet a terminal completed result.
+_GH_IN_PROGRESS_STATES = frozenset({'PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED'})
+_GH_MERGE_STRATEGY_FLAGS = {
+    'squash': '--squash',
+    'merge': '--merge',
+    'rebase': '--rebase',
+}
+
+
+class GhCliClient:
+    """Production `GitHubClient` backed by the `gh` CLI.
+
+    Never exercised against a real GitHub remote in this test suite -- every
+    test injects a fake `GitHubClient` instead (SPEC.md §23 Microtask 22
+    scope: "tests using local git fixtures/fake GitHub responses").
+    """
+
+    def _gh(self, repo_path: Path, *args: str) -> str:
+        resolved = shutil.which('gh')
+        if resolved is None:
+            raise GitCommandError(('gh',), -1, 'gh executable not found on PATH')
+        argv = (resolved, *args)
+        result = subprocess.run(  # noqa: S603 -- argv list, no shell, gh resolved via PATH
+            argv,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise GitCommandError(argv, result.returncode, result.stderr)
+        return result.stdout
+
+    def find_pull_request(
+        self, *, repo_path: Path, head_branch: str
+    ) -> PullRequestRef | None:
+        try:
+            output = self._gh(
+                repo_path,
+                'pr',
+                'view',
+                head_branch,
+                '--json',
+                'number,url,headRefOid,state',
+            )
+        except GitCommandError:
+            return None
+        data = json.loads(output)
+        return PullRequestRef(
+            number=data['number'],
+            url=data['url'],
+            head_sha=data['headRefOid'],
+            state=data['state'].lower(),
+        )
+
+    def create_pull_request(self, request: CreatePullRequestInput) -> PullRequestRef:
+        args = [
+            'pr',
+            'create',
+            '--head',
+            request.head,
+            '--base',
+            request.base,
+            '--title',
+            request.title,
+            '--body',
+            request.body,
+        ]
+        for reviewer in request.reviewers:
+            args += ['--reviewer', reviewer]
+        self._gh(request.repo_path, *args)
+        created = self.find_pull_request(
+            repo_path=request.repo_path, head_branch=request.head
+        )
+        if created is None:  # pragma: no cover -- gh reported success but no PR found
+            raise GitCommandError(('gh', 'pr', 'create'), -1, 'PR not found after create')
+        return created
+
+    def list_check_runs(
+        self, *, repo_path: Path, head_sha: str
+    ) -> tuple[CheckRunObservation, ...]:
+        output = self._gh(repo_path, 'pr', 'checks', '--json', 'name,state,link')
+        observations = []
+        for entry in json.loads(output):
+            state = str(entry.get('state', '')).upper()
+            if state in _GH_IN_PROGRESS_STATES:
+                status, conclusion = 'in_progress', None
+            else:
+                status, conclusion = 'completed', state.lower()
+            observations.append(
+                CheckRunObservation(
+                    name=entry['name'],
+                    head_sha=head_sha,
+                    status=status,
+                    conclusion=conclusion,
+                    url=entry.get('link'),
+                )
+            )
+        return tuple(observations)
+
+    def merge_pull_request(
+        self,
+        *,
+        repo_path: Path,
+        number: int,
+        strategy: str,
+        delete_branch: bool,
+    ) -> None:
+        args = ['pr', 'merge', str(number), _GH_MERGE_STRATEGY_FLAGS[strategy]]
+        if delete_branch:
+            args.append('--delete-branch')
+        self._gh(repo_path, *args)
