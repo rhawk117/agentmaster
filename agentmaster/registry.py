@@ -97,6 +97,26 @@ COMMAND_REGISTRY: tuple[CommandEntry, ...] = (
         name='build',
         description='Build a bounded, session-scoped context pack.',
     ),
+    CommandEntry(
+        group='delivery',
+        name='prepare-pr',
+        description='Stage, commit, push, and open/reconcile a PR via the git publisher.',
+    ),
+    CommandEntry(
+        group='delivery',
+        name='watch-ci',
+        description='Poll required checks and advance CIPending to ReviewRequired.',
+    ),
+    CommandEntry(
+        group='delivery',
+        name='review-gate',
+        description='Verify PR/CI/reviewed-SHA match and unresolved findings.',
+    ),
+    CommandEntry(
+        group='delivery',
+        name='merge-gate',
+        description='Repeat the review-gate checks and merge on an exact head match.',
+    ),
 )
 
 

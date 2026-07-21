@@ -66,6 +66,15 @@ maxTurns: 50
 color: green
 # isolation: worktree  # uncomment to give each implementer an isolated git worktree instead of relying on disjoint file ownership
 """,
+    'git-publisher': """\
+name: git-publisher
+description: Coordinator-owned bounded git/GitHub operations — stage, commit, push, open/reconcile a PR, watch CI, and merge only on an exact PR/CI/review head match. Never edits repository files and never force-pushes. Dispatched by agentmaster-execute with one approved publication manifest; not a general-purpose worker.
+tools: Read, Bash
+model: sonnet
+effort: medium
+maxTurns: 20
+color: yellow
+""",
 }
 
 _COPILOT_FRONTMATTER: Mapping[str, str] = {
@@ -97,6 +106,13 @@ user-invocable: false
 tools: ['read', 'search', 'execute', 'edit']
 model: claude-sonnet-4.6
 """,
+    'git-publisher': """\
+name: git-publisher
+description: Coordinator-owned bounded git/GitHub operations — stage, commit, push, open/reconcile a PR, watch CI, merge only on an exact PR/CI/review head match. Never edits repository files, never force-pushes. Delegation-only worker for agentmaster-execute.
+user-invocable: false
+tools: ['read', 'execute']
+model: claude-sonnet-4.6
+""",
 }
 
 _USES_RULE_CLAUDE = """\
@@ -110,7 +126,7 @@ If the task names a repository skill, instructions file, or tool under a
    encodes."""
 
 MANIFEST = Manifest(
-    workers=('scout', 'code-analyst', 'plan-critic', 'implementer'),
+    workers=('scout', 'code-analyst', 'plan-critic', 'implementer', 'git-publisher'),
     claude_skills=(
         'agentmaster-plan',
         'agentmaster-execute',
