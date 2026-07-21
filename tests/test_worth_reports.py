@@ -1,0 +1,166 @@
+"""Tests for EVALUATION/EVALUATION_METRIC's worth-report schema (SPEC.md §17.2, §18).
+
+§18: "'Worth' is a report, not a mutable scalar" and "Comparisons must name
+their cohort and method"; EVALUATION_METRIC's `method` column is how a stored
+metric names the method that produced it, and `CHECK (memory_id IS NOT NULL
+OR procedure_version_id IS NOT NULL)` on EVALUATION keeps every evaluation
+anchored to the memory or procedure version it judges.
+"""
+
+import sqlite3
+
+import pytest
+
+from ledger.connection import connect
+from ledger.migrations import migrate
+
+_CREATED_AT = '2026-07-20T00:00:00Z'
+
+
+def _seed_project(
+    connection: sqlite3.Connection, *, project_id: str = 'project-1'
+) -> None:
+    connection.execute(
+        'INSERT INTO PROJECT (id, canonical_root, fingerprint, created_at, last_seen_at) '
+        'VALUES (?, ?, ?, ?, ?)',
+        (project_id, '/repo', f'fp-{project_id}', _CREATED_AT, _CREATED_AT),
+    )
+    connection.commit()
+
+
+def _seed_memory(connection: sqlite3.Connection, *, memory_id: str = 'memory-1') -> None:
+    if (
+        connection.execute("SELECT 1 FROM PROJECT WHERE id = 'project-1'").fetchone()
+        is None
+    ):
+        _seed_project(connection)
+    connection.execute(
+        'INSERT INTO MEMORY '
+        '(id, origin_project_id, state, memory_kind, title, content, '
+        'created_at, updated_at) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (
+            memory_id,
+            'project-1',
+            'Candidate',
+            'lesson',
+            'title',
+            'content',
+            _CREATED_AT,
+            _CREATED_AT,
+        ),
+    )
+    connection.commit()
+
+
+def _seed_evaluation(
+    connection: sqlite3.Connection, *, evaluation_id: str = 'eval-1'
+) -> None:
+    _seed_memory(connection)
+    connection.execute(
+        'INSERT INTO EVALUATION '
+        '(id, memory_id, project_id, evaluation_kind, decision, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (evaluation_id, 'memory-1', 'project-1', 'worth', 'promote', _CREATED_AT),
+    )
+    connection.commit()
+
+
+@pytest.mark.sqlite
+def test_evaluation_metric_records_a_named_measure_with_a_method(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_evaluation(connection)
+
+    connection.execute(
+        'INSERT INTO EVALUATION_METRIC '
+        '(evaluation_id, metric_name, value_microunits, unit, method) '
+        "VALUES ('eval-1', 'reuse_count', 3000000, 'count', 'descriptive-cohort-a')"
+    )
+    connection.commit()
+
+    row = connection.execute(
+        'SELECT metric_name, value_microunits, unit, method FROM EVALUATION_METRIC '
+        "WHERE evaluation_id = 'eval-1'"
+    ).fetchone()
+    assert row == ('reuse_count', 3000000, 'count', 'descriptive-cohort-a')
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_evaluation_metric_requires_a_method(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_evaluation(connection)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            'INSERT INTO EVALUATION_METRIC '
+            '(evaluation_id, metric_name, value_microunits, unit, method) '
+            "VALUES ('eval-1', 'reuse_count', 3000000, 'count', NULL)"
+        )
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_evaluation_metric_rejects_an_unknown_evaluation(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            'INSERT INTO EVALUATION_METRIC '
+            '(evaluation_id, metric_name, value_microunits, unit, method) '
+            "VALUES ('no-such-eval', 'reuse_count', 3000000, 'count', 'descriptive')"
+        )
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_a_single_evaluation_can_carry_multiple_named_metrics(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_evaluation(connection)
+
+    connection.execute(
+        'INSERT INTO EVALUATION_METRIC '
+        '(evaluation_id, metric_name, value_microunits, unit, method) '
+        "VALUES ('eval-1', 'reuse_count', 3000000, 'count', 'descriptive')"
+    )
+    connection.execute(
+        'INSERT INTO EVALUATION_METRIC '
+        '(evaluation_id, metric_name, value_microunits, unit, method) '
+        "VALUES ('eval-1', 'harmful_count', 0, 'count', 'descriptive')"
+    )
+    connection.commit()
+
+    rows = connection.execute(
+        "SELECT metric_name FROM EVALUATION_METRIC WHERE evaluation_id = 'eval-1' "
+        'ORDER BY metric_name'
+    ).fetchall()
+    assert rows == [('harmful_count',), ('reuse_count',)]
+    connection.close()
+
+
+@pytest.mark.sqlite
+def test_evaluation_rejects_an_evaluator_session_id_from_a_user_session(tmp_path):
+    connection = connect(tmp_path / 'ledger.sqlite3')
+    migrate(connection)
+    _seed_memory(connection)
+    connection.execute(
+        'INSERT INTO USER_SESSION (user_session_id, harness_session_id, created_at) '
+        'VALUES (?, ?, ?)',
+        ('user-session-1', 'harness-1', _CREATED_AT),
+    )
+    connection.commit()
+
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            'INSERT INTO EVALUATION '
+            '(id, memory_id, project_id, evaluator_session_id, evaluation_kind, '
+            'decision, created_at) '
+            "VALUES ('eval-1', 'memory-1', 'project-1', 'user-session-1', 'worth', "
+            "'promote', ?)",
+            (_CREATED_AT,),
+        )
+    connection.close()
