@@ -6,6 +6,7 @@ import sys
 import pytest
 from conftest import SeededMemory, seed_memory, seed_project_run_task
 
+from ledger.budget_policy import Budget, bounded_context_pack_tokens
 from ledger.connection import connect
 from ledger.context_pack import (
     ContextPackRequest,
@@ -67,6 +68,38 @@ def test_build_context_pack_truncates_when_budget_is_exhausted(connection):
 
     assert pack.selected_memories == ()
     assert pack.stop_conditions == ('memory_budget_exhausted',)
+
+
+@pytest.mark.sqlite
+def test_build_context_pack_honors_a_budget_capped_by_bounded_context_pack_tokens(
+    connection,
+):
+    seed_project_run_task(connection)
+    seed_memory(
+        connection,
+        SeededMemory(memory_id='memory-1', content='retry backoff jitter guidance'),
+    )
+    budget = Budget(
+        token_budget=10_000,
+        cost_micro_usd_budget=10_000,
+        duration_ms_budget=10_000,
+        parallelism_budget=1,
+        context_pack_token_budget=5,
+    )
+    requested_tokens = bounded_context_pack_tokens(budget, requested_tokens=1_000)
+    request = ContextPackRequest(
+        project_id='project-1',
+        user_session_id='user-session-1',
+        run_id='run-1',
+        task_id='task-1',
+        budget_tokens=requested_tokens,
+    )
+
+    pack = build_context_pack(connection, request, created_at=_CREATED_AT)
+
+    assert requested_tokens == 5
+    assert pack.budget_tokens == 5
+    assert pack.estimated_tokens <= 5
 
 
 @pytest.mark.sqlite
