@@ -1,7 +1,10 @@
 """Tests for the ledger init/migrate/backup/doctor commands (SPEC.md §19)."""
 
+import json
 import sqlite3
 import stat
+import subprocess
+import sys
 
 import pytest
 
@@ -95,3 +98,70 @@ def test_main_dispatches_init_subcommand(tmp_path):
 
     assert exit_code == 0
     assert ledger_path.is_file()
+
+
+@pytest.mark.sqlite
+def test_cmd_doctor_json_output_reports_the_same_findings_as_text(tmp_path, capsys):
+    ledger_path = tmp_path / 'ledger.sqlite3'
+    cmd_init(ledger_path)
+
+    exit_code = cmd_doctor(ledger_path, json_output=True)
+
+    assert exit_code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['schema_version'] == SUPPORTED_SCHEMA_VERSION
+    assert report['healthy'] is True
+    assert report['integrity_check'] == 'ok'
+
+
+@pytest.mark.sqlite
+def test_main_dispatches_doctor_json_flag(tmp_path):
+    ledger_path = tmp_path / 'ledger.sqlite3'
+    cmd_init(ledger_path)
+
+    exit_code = main(['doctor', '--path', str(ledger_path), '--json'])
+
+    assert exit_code == 0
+
+
+@pytest.mark.subprocess
+def test_agentmaster_ledger_doctor_json_subprocess(tmp_path, repo_root):
+    ledger_path = tmp_path / 'ledger.sqlite3'
+    subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            '-m',
+            'agentmaster',
+            'ledger',
+            'init',
+            '--path',
+            str(ledger_path),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            '-m',
+            'agentmaster',
+            'ledger',
+            'doctor',
+            '--path',
+            str(ledger_path),
+            '--json',
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report['healthy'] is True
