@@ -272,3 +272,49 @@ def test_memory_show_on_an_unknown_id_fails(capsys, ledger_path):
 
     assert exit_code == 1
     assert 'not found' in capsys.readouterr().err
+
+
+def test_context_route_sends_a_risky_task_to_stronger_review(capsys):
+    exit_code = main(['context', 'route', '--auth', '--json'])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['route'] == 'stronger_review'
+    assert payload['risk_level'] == 'high'
+    assert 'auth' in payload['risk_factors']
+
+
+def test_context_route_sends_an_ambiguous_only_task_to_a_coordinator_scout(capsys):
+    exit_code = main(['context', 'route', '--ambiguous', '--json'])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['route'] == 'coordinator_scout'
+
+
+def test_context_route_sends_a_plain_task_to_the_implementer(capsys):
+    exit_code = main(['context', 'route', '--json'])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['route'] == 'implementer'
+    assert payload['risk_level'] == 'routine'
+
+
+def test_context_route_includes_scout_authorization_when_scouts_are_requested(capsys):
+    exit_code = main([
+        'context',
+        'route',
+        '--ambiguous',
+        '--requested-scouts',
+        '1',
+        '--implementer-scout-enabled',
+        '--implementer-scout-budget-tokens',
+        '500',
+        '--json',
+    ])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['scout_authorization']['authorized'] is True
+    assert payload['scout_authorization']['budget_tokens'] == 500

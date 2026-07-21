@@ -84,6 +84,13 @@ from ledger.review_gate import (
     DeliveryAttemptNotFoundError as ReviewDeliveryAttemptNotFoundError,
 )
 from ledger.review_gate import ReviewGateInput, apply_review_result
+from ledger.risk_routing import (
+    ImplementerScoutPolicy,
+    RiskFactors,
+    authorize_implementer_scout,
+    classify_risk,
+    route_task,
+)
 from ledger.worth import compute_memory_worth, compute_procedure_worth, compute_run_worth
 
 if TYPE_CHECKING:
@@ -436,6 +443,47 @@ def _cmd_context_build(args: argparse.Namespace) -> int:
         text_lines.append(f'stop conditions: {", ".join(pack.stop_conditions)}')
     text_lines.append(f'digest {pack.digest}')
     _emit(json_output=args.json_output, payload=asdict(pack), text_lines=text_lines)
+    return 0
+
+
+def _cmd_context_route(args: argparse.Namespace) -> int:
+    factors = RiskFactors(
+        destructive_state=args.destructive_state,
+        migration=args.migration,
+        auth=args.auth,
+        concurrency=args.concurrency,
+        release=args.release,
+        schema=args.schema,
+        public_api=args.public_api,
+        large_change_surface=args.large_change_surface,
+    )
+    risk_classification = classify_risk(factors)
+    decision = route_task(factors, ambiguous=args.ambiguous)
+
+    payload: dict[str, object] = {
+        'risk_classification': risk_classification,
+        **asdict(decision),
+    }
+    text_lines = [
+        f'route: {decision.route} (risk={decision.risk_level})',
+        f'reason: {decision.reason}',
+    ]
+    if decision.risk_factors:
+        text_lines.append(f'risk factors: {", ".join(decision.risk_factors)}')
+
+    if args.requested_scouts > 0:
+        policy = ImplementerScoutPolicy(
+            enabled=args.implementer_scout_enabled,
+            scout_budget_tokens=args.implementer_scout_budget_tokens,
+        )
+        authorization = authorize_implementer_scout(policy, args.requested_scouts)
+        payload['scout_authorization'] = asdict(authorization)
+        text_lines.append(
+            f'scout authorization: authorized={authorization.authorized} '
+            f'max_scouts={authorization.max_scouts} reason={authorization.reason}'
+        )
+
+    _emit(json_output=args.json_output, payload=payload, text_lines=text_lines)
     return 0
 
 
@@ -979,7 +1027,7 @@ def _build_memory_subparser(sub: argparse._SubParsersAction) -> dict[str, Callab
     _add_path_argument(validate_cmd)
     validate_cmd.add_argument('--memory-id', required=True)
     validate_cmd.add_argument('--evidence-id', required=True)
-    validate_cmd.add_argument('--validating-session-id', default=None)
+    validate_cmd.add_argument('--validating-session-id', required=True)
 
     activate_cmd = memory_sub.add_parser('activate')
     _add_path_argument(activate_cmd)
@@ -1036,7 +1084,22 @@ def _build_context_subparser(sub: argparse._SubParsersAction) -> dict[str, Calla
     build_cmd.add_argument('--budget-tokens', type=int, required=True)
     build_cmd.add_argument('--query', default=None)
 
-    return {'build': _cmd_context_build}
+    route_cmd = context_sub.add_parser('route')
+    _add_json_argument(route_cmd)
+    route_cmd.add_argument('--destructive-state', action='store_true')
+    route_cmd.add_argument('--migration', action='store_true')
+    route_cmd.add_argument('--auth', action='store_true')
+    route_cmd.add_argument('--concurrency', action='store_true')
+    route_cmd.add_argument('--release', action='store_true')
+    route_cmd.add_argument('--schema', action='store_true')
+    route_cmd.add_argument('--public-api', action='store_true')
+    route_cmd.add_argument('--large-change-surface', action='store_true')
+    route_cmd.add_argument('--ambiguous', action='store_true')
+    route_cmd.add_argument('--requested-scouts', type=int, default=0)
+    route_cmd.add_argument('--implementer-scout-enabled', action='store_true')
+    route_cmd.add_argument('--implementer-scout-budget-tokens', type=int, default=0)
+
+    return {'build': _cmd_context_build, 'route': _cmd_context_route}
 
 
 def _add_publication_arguments(cmd: argparse.ArgumentParser) -> None:

@@ -145,9 +145,7 @@ def test_show_memory_returns_the_full_row(connection):
 
 
 @pytest.mark.sqlite
-def test_validate_memory_transitions_candidate_to_validated_and_links_evidence(
-    connection,
-):
+def test_validate_memory_rejects_a_missing_validating_session_id(connection):
     seed_memory(connection, SeededMemory(memory_id='memory-1', state='Candidate'))
     connection.execute(
         'INSERT INTO ARTIFACT '
@@ -164,16 +162,19 @@ def test_validate_memory_transitions_candidate_to_validated_and_links_evidence(
     )
     connection.commit()
 
-    validate_memory(connection, 'memory-1', 'evidence-1', updated_at=_CREATED_AT)
+    with pytest.raises(IllegalMemoryTransitionError):
+        validate_memory(
+            connection,
+            'memory-1',
+            'evidence-1',
+            updated_at=_CREATED_AT,
+            validating_session_id=None,
+        )
 
     state = connection.execute(
         "SELECT state FROM MEMORY WHERE id = 'memory-1'"
     ).fetchone()[0]
-    assert state == 'Validated'
-    link = connection.execute(
-        "SELECT relation FROM MEMORY_EVIDENCE WHERE memory_id = 'memory-1'"
-    ).fetchone()
-    assert link == ('validates',)
+    assert state == 'Candidate'
 
 
 @pytest.mark.sqlite

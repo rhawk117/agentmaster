@@ -1,8 +1,9 @@
 """Cross-project memory promotion policy (SPEC.md §17.4, §18, §20.4, §23 M23).
 
-`ledger.memory_service.validate_memory` already enforces §17.4's
-session-independence rule for the Candidate->Validated step. This module
-covers the step above it: "enforce project activation and cross-project
+`ledger.memory_service.validate_memory` unconditionally enforces §17.4's
+session-independence rule for the Candidate->Validated step -- a validating
+session id is mandatory there, with no argument value that skips it. This
+module covers the step above it: "enforce project activation and cross-project
 global promotion thresholds" (§23 M23). `distinct_evidence_project_count`
 counts *distinct projects*, not evidence rows, so it is resistant to the
 confirmation-bias cases SPEC.md §23 M23 names by construction -- "repeated
