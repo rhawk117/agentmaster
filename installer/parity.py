@@ -17,6 +17,8 @@ CRITERIA_START = '<!-- agentmaster:criteria:start -->'
 CRITERIA_END = '<!-- agentmaster:criteria:end -->'
 WRITING_SKILLS_CRITERIA_START = '<!-- agentmaster:writing-skills-criteria:start -->'
 WRITING_SKILLS_CRITERIA_END = '<!-- agentmaster:writing-skills-criteria:end -->'
+EXECUTE_ORCHESTRATION_START = '<!-- agentmaster:execute-orchestration:start -->'
+EXECUTE_ORCHESTRATION_END = '<!-- agentmaster:execute-orchestration:end -->'
 
 
 def _sources(root: Path, manifest: Manifest) -> list[Path]:
@@ -116,6 +118,12 @@ _CRITERIA_CANONS = (
         _writing_skills_criteria_targets,
         WRITING_SKILLS_CRITERIA_START,
         WRITING_SKILLS_CRITERIA_END,
+    ),
+    (
+        Path('criteria') / 'execute-orchestration-criteria.md',
+        _writing_skills_criteria_targets,
+        EXECUTE_ORCHESTRATION_START,
+        EXECUTE_ORCHESTRATION_END,
     ),
 )
 
