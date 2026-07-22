@@ -3,6 +3,7 @@
 import contextlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 EVENT_SPOOL_SCHEMA_VERSION = 1
+DEFAULT_INGEST_LIMIT = 50
 
 
 def read_payload() -> dict[str, Any]:
@@ -171,6 +173,97 @@ def spool_event(payload: dict[str, Any], event: dict[str, Any]) -> None:
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
+
+
+class RuntimeDescriptor(NamedTuple):
+    """The installed Runtime descriptor contract fields, parsed from `runtime.json`."""
+
+    config_path: Path
+    launcher: Path
+    ledger_path: Path | None
+    ledger_enabled: bool
+    artifact_dir: Path
+    schema_version: int
+
+
+def load_runtime_descriptor() -> RuntimeDescriptor | None:
+    """Load the installed `runtime.json` beside this hook, or `None` on any error.
+
+    `hooklib.py` is installed alongside every other hook file (`installer/
+    manifest.py`'s `claude_hooks`/`copilot_hooks`); the descriptor itself
+    sits one level up for Claude (`<home>/agentmaster/runtime.json` next to
+    `<home>/agentmaster/hooks/`) and beside the hooks for Copilot
+    (`<home>/agentmaster-hooks/runtime.json`), so both candidate locations
+    relative to this file are checked. Never raises: a missing/malformed
+    descriptor (uninstalled dev checkout, corrupt file) fails open by
+    returning `None`, exactly like every other hook-side failure mode.
+    """
+    here = Path(__file__).resolve().parent
+    for candidate in (here / 'runtime.json', here.parent / 'runtime.json'):
+        with contextlib.suppress(Exception):
+            document = json.loads(candidate.read_text(encoding='utf-8'))
+            return RuntimeDescriptor(
+                config_path=Path(document['config_path']),
+                launcher=Path(document['launcher']),
+                ledger_path=(
+                    Path(document['ledger_path'])
+                    if document['ledger_path'] is not None
+                    else None
+                ),
+                ledger_enabled=bool(document['ledger_enabled']),
+                artifact_dir=Path(document['artifact_dir']),
+                schema_version=int(document['schema_version']),
+            )
+    return None
+
+
+def auto_drain(payload: dict[str, Any], *, limit: int = DEFAULT_INGEST_LIMIT) -> None:
+    """Fire a bounded, fail-open ingest of this workspace's spooled events.
+
+    Invoked at safe checkpoints (session start, subagent stop, post-compaction,
+    Copilot post-agent-tool) right after `spool_event` durably writes an
+    event, so the spool never grows unboundedly between manual `agentmaster
+    ledger ingest-events` calls. Does nothing when no runtime is installed,
+    the ledger is disabled, or the launcher is missing -- a hook must never
+    block or fail the harness on optional observability (SPEC.md §9, §16.1).
+    Ingestion counts are only surfaced to `hook-debug.jsonl` when
+    `AGENTMASTER_HOOK_DEBUG` is set; normal hooks stay silent.
+    """
+    with contextlib.suppress(Exception):
+        descriptor = load_runtime_descriptor()
+        if descriptor is None or not descriptor.ledger_enabled:
+            return
+        if descriptor.ledger_path is None or not descriptor.launcher.is_file():
+            return
+        result = subprocess.run(  # noqa: S603
+            [
+                str(descriptor.launcher),
+                'ledger',
+                'ingest-events',
+                '--path',
+                str(descriptor.ledger_path),
+                '--spool',
+                str(events_dir(payload)),
+                '--limit',
+                str(limit),
+                '--json',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if os.environ.get('AGENTMASTER_HOOK_DEBUG'):
+            am = agentmaster_dir(payload)
+            with (am / 'hook-debug.jsonl').open('a') as f:
+                f.write(
+                    json.dumps({
+                        'auto_drain_returncode': result.returncode,
+                        'auto_drain_stdout': result.stdout,
+                        'auto_drain_stderr': result.stderr,
+                    })
+                    + '\n'
+                )
 
 
 def tool_name(payload: dict[str, Any]) -> str:

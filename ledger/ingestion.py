@@ -145,6 +145,64 @@ def resolve_run(
     return run_write_transaction(connection, _op)
 
 
+def _read_run_id_marker(spool_dir: Path, harness_session_id: str) -> str | None:
+    """Read the session's `.run_id` marker, or `None` when absent/unreadable.
+
+    `spool_dir` is `<workspace>/.agentmaster/events`; the marker lives at
+    `<workspace>/.agentmaster/sessions/<harness_session_id>/.run_id`
+    (`hooklib.session_dir`'s layout), a sibling of `events/` under the same
+    `.agentmaster` root.
+    """
+    marker = spool_dir.parent / 'sessions' / harness_session_id / '.run_id'
+    try:
+        text = marker.read_text(encoding='utf-8').strip()
+    except OSError:
+        return None
+    return text or None
+
+
+@dataclass(frozen=True, slots=True)
+class _RunResolutionContext:
+    """Bundles a `resolve_run` call's arguments so the marker-preferring
+    wrapper below stays under the project's max-arguments lint (PLR0913).
+    """
+
+    project_id: str
+    user_session_id: str
+    id_factory: Callable[[], str]
+    now: Callable[[], str]
+
+
+def _resolve_run_preferring_marker(
+    connection: sqlite3.Connection,
+    event: SpooledEvent,
+    spool_dir: Path,
+    context: _RunResolutionContext,
+) -> str:
+    """RUN-reconciliation contract: prefer the session's `.run_id` marker.
+
+    When an orchestrator RUN already names itself in the marker, drained
+    AGENT_SESSION/MODEL_CALL rows must attach to that RUN rather than a
+    second, ingestion-created one; `resolve_run`'s session-scoped open-RUN
+    lookup is only used as a fallback, when no marker exists or it names a
+    RUN that isn't there (never a hard error -- markers are best-effort).
+    """
+    preferred_run_id = _read_run_id_marker(spool_dir, event.harness_session_id)
+    if preferred_run_id is not None:
+        row = connection.execute(
+            'SELECT id FROM RUN WHERE id = ?', (preferred_run_id,)
+        ).fetchone()
+        if row is not None:
+            return row[0]
+    return resolve_run(
+        connection,
+        project_id=context.project_id,
+        user_session_id=context.user_session_id,
+        id_factory=context.id_factory,
+        now=context.now,
+    )
+
+
 def _agent_session_id(run_id: str, agent_key: str) -> str:
     return f'agent-session:{run_id}:{agent_key}'
 
@@ -186,6 +244,7 @@ def _ingest_agent_session_event(
     *,
     id_factory: Callable[[], str],
     now: Callable[[], str],
+    spool_dir: Path,
 ) -> None:
     fields = event.fields
     user_session_id = upsert_user_session(
@@ -197,12 +256,16 @@ def _ingest_agent_session_event(
         id_factory=id_factory,
         now=now,
     )
-    run_id = resolve_run(
+    run_id = _resolve_run_preferring_marker(
         connection,
-        project_id=project_id,
-        user_session_id=user_session_id,
-        id_factory=id_factory,
-        now=now,
+        event,
+        spool_dir,
+        _RunResolutionContext(
+            project_id=project_id,
+            user_session_id=user_session_id,
+            id_factory=id_factory,
+            now=now,
+        ),
     )
     agent_id = str(fields.get('agent_id') or '')
     agent_session_id = _agent_session_id(run_id, agent_id or id_factory())
@@ -302,6 +365,7 @@ def _ingest_compaction_event(
     *,
     id_factory: Callable[[], str],
     now: Callable[[], str],
+    spool_dir: Path,
 ) -> None:
     fields = event.fields
     user_session_id = upsert_user_session(
@@ -313,12 +377,16 @@ def _ingest_compaction_event(
         id_factory=id_factory,
         now=now,
     )
-    run_id = resolve_run(
+    run_id = _resolve_run_preferring_marker(
         connection,
-        project_id=project_id,
-        user_session_id=user_session_id,
-        id_factory=id_factory,
-        now=now,
+        event,
+        spool_dir,
+        _RunResolutionContext(
+            project_id=project_id,
+            user_session_id=user_session_id,
+            id_factory=id_factory,
+            now=now,
+        ),
     )
     agent_key = str(fields.get('agent_type') or 'main')
     agent_session_id = _agent_session_id(run_id, agent_key)
@@ -371,27 +439,35 @@ def ingest_pending_events(
     *,
     id_factory: Callable[[], str],
     now: Callable[[], str],
+    limit: int | None = None,
 ) -> IngestReport:
-    """Drain every spooled event in `spool_dir` into ledger rows.
+    """Drain up to `limit` spooled events in `spool_dir` into ledger rows.
 
     Successfully ingested and malformed/unsupported files are discarded
     (replaying a malformed file cannot succeed later, and an unsupported
     `kind` will never gain a handler retroactively). A file that raises a
     `sqlite3.Error` during ingestion is left in place for a future retry.
+    `limit` bounds only the well-formed events actually processed (each one
+    costs a write transaction); malformed files are always discarded since
+    doing so is a cheap unlink, not a ledger write. Events beyond `limit`
+    are left untouched in `spool_dir` for the next checkpoint to drain.
     """
     result = read_events(spool_dir)
+    events = result.events if limit is None else result.events[:limit]
     ingested = 0
     unsupported = 0
     failed = 0
     to_discard = list(result.malformed)
-    for event in result.events:
+    for event in events:
         handler = _HANDLERS.get(event.kind)
         if handler is None:
             unsupported += 1
             to_discard.append(event.path)
             continue
         try:
-            handler(connection, event, id_factory=id_factory, now=now)
+            handler(
+                connection, event, id_factory=id_factory, now=now, spool_dir=spool_dir
+            )
         except sqlite3.Error:
             failed += 1
             continue

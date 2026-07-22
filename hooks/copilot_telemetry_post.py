@@ -6,6 +6,20 @@ import time
 import hooklib
 
 
+def _to_int(value: str | int) -> int | None:
+    """Return `value` as a non-negative int, or `None` when absent/unparseable.
+
+    Never fabricates a token/duration value (SPEC.md §16.3): an empty
+    string or a value that isn't a real non-negative integer becomes NULL
+    rather than 0 or a guess.
+    """
+    try:
+        parsed = int(value)
+    except TypeError, ValueError:
+        return None
+    return parsed if parsed >= 0 else None
+
+
 def main() -> int:
     payload = hooklib.read_payload()
     if hooklib.tool_name(payload) != 'agent':
@@ -21,6 +35,19 @@ def main() -> int:
             rest = lines[1:]
             qf.write_text('\n'.join(rest) + ('\n' if rest else ''))
     hooklib.append_telemetry(payload, agent, '', duration)
+    hooklib.spool_event(
+        payload,
+        {
+            'kind': 'agent_session',
+            'cwd': str(hooklib.workspace(payload)),
+            'agent_id': '',
+            'role': agent,
+            'model': '',
+            'total_tokens': None,
+            'duration_ms': _to_int(duration),
+        },
+    )
+    hooklib.auto_drain(payload)
     return 0
 
 

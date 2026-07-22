@@ -238,6 +238,7 @@ def _cmd_ledger_ingest_events(args: argparse.Namespace) -> int:
             Path(args.spool),
             id_factory=lambda: str(uuid.uuid4()),
             now=_now,
+            limit=args.limit,
         )
     finally:
         connection.close()
@@ -992,6 +993,7 @@ def _build_ledger_subparser(sub: argparse._SubParsersAction) -> dict[str, Callab
     _add_path_argument(ingest_events_cmd)
     _add_json_argument(ingest_events_cmd)
     ingest_events_cmd.add_argument('--spool', required=True)
+    ingest_events_cmd.add_argument('--limit', type=int, default=None)
 
     return {
         'init': _cmd_ledger_init,

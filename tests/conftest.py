@@ -145,6 +145,39 @@ def run_hook(tmp_path: Path) -> Callable[..., subprocess.CompletedProcess[str]]:
     return _run
 
 
+@pytest.fixture
+def installed_hook() -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Invoke an INSTALLED hook file (not the source checkout's `hooks/`).
+
+    Complements `run_hook`: tests asserting the runtime-descriptor-driven
+    auto-drain (which resolves `runtime.json` relative to the hook's own
+    installed location) must run the hook copy the installer actually wrote
+    -- e.g. `<claude_home>/agentmaster/hooks/telemetry.py` -- with `cwd` set
+    to the target workspace the payload's `cwd` field also names.
+    """
+
+    def _run(
+        hook_path: Path,
+        payload: object,
+        cwd: Path,
+        env_extra: Mapping[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        env = _scrubbed_base_env()
+        env.update(env_extra or {})
+        return subprocess.run(  # noqa: S603
+            [sys.executable, str(hook_path)],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+            env=env,
+            timeout=30,
+            check=False,
+        )
+
+    return _run
+
+
 @dataclass(frozen=True, slots=True)
 class SeededRun:
     """Canonical ids for one seeded PROJECT + USER_SESSION + RUN (+ optional TASK)."""

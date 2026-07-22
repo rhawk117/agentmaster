@@ -145,16 +145,35 @@ def test_installed_launcher_runs_standalone_from_a_separate_repo(
 
 
 def test_success_is_judged_by_committed_rows_never_file_size(
-    run_cli, repo_root, tmp_path
+    run_cli, repo_root, tmp_path, installed_hook
 ):
     """Scenario 8: assert row visibility after ingestion, explicitly not
-    ledger.sqlite3 file-size/`du` growth.
+    ledger.sqlite3 file-size/`du` growth. Triggers one installed-hook event
+    (SubagentStop) so there is something to auto-drain and commit.
     """
-    result, _claude_home, agentmaster_home = _install(run_cli, repo_root, tmp_path)
+    result, claude_home, agentmaster_home = _install(run_cli, repo_root, tmp_path)
     assert result.returncode == 0, result.stderr
 
     ledger_path = agentmaster_home / 'ledger.sqlite3'
     assert ledger_path.is_file()
+
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    hook_path = claude_home / 'agentmaster' / 'hooks' / 'telemetry.py'
+    hook_result = installed_hook(
+        hook_path,
+        {
+            'cwd': str(workspace),
+            'session_id': 'sess-claude-8',
+            'hook_event_name': 'SubagentStop',
+            'agent_type': 'implementer',
+            'agent_id': 'agent-8',
+            'agent_model': 'claude-sonnet-5',
+            'total_tokens': 900,
+        },
+        cwd=workspace,
+    )
+    assert hook_result.returncode == 0, hook_result.stderr
 
     connection = sqlite3.connect(str(ledger_path))
     try:
