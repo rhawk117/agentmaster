@@ -16,7 +16,16 @@ import sqlite3
 
 import pytest
 
-pytestmark = pytest.mark.subprocess
+from ledger.connection import connect as connect_ledger
+from ledger.event_spool import SpooledEvent
+from ledger.ingestion import (
+    _read_run_id_marker,
+    _resolve_run_preferring_marker,
+    _RunResolutionContext,
+    resolve_project,
+    upsert_user_session,
+)
+from ledger.migrations import migrate as migrate_ledger
 
 
 def _subagent_stop_payload(workspace, *, agent_id='agent-42'):
@@ -51,6 +60,7 @@ def _install_claude(run_cli, repo_root, tmp_path):
     return claude_home, agentmaster_home
 
 
+@pytest.mark.subprocess
 @pytest.mark.integration
 def test_subagent_stop_spools_but_never_auto_drains_into_ledger(
     tmp_path, run_cli, repo_root, installed_hook
@@ -98,6 +108,7 @@ def test_subagent_stop_spools_but_never_auto_drains_into_ledger(
     )
 
 
+@pytest.mark.subprocess
 @pytest.mark.integration
 def test_retry_after_ledger_unavailable_persists_exactly_once_at_next_checkpoint(
     tmp_path, run_cli, repo_root, installed_hook
@@ -163,6 +174,7 @@ def test_retry_after_ledger_unavailable_persists_exactly_once_at_next_checkpoint
     )
 
 
+@pytest.mark.subprocess
 def test_copilot_post_agent_spools_agent_session_like_claude(tmp_path, run_hook):
     """Scenario 4: Copilot parity. `copilot_telemetry_post.py` calls
     `append_telemetry` but never `hooklib.spool_event` (evidence 10), so zero
@@ -200,3 +212,87 @@ def test_copilot_post_agent_spools_agent_session_like_claude(tmp_path, run_hook)
     # Missing token/model must stay NULL, never a fabricated 0 (SPEC.md §16.3).
     assert event.get('total_tokens') is None
     assert event.get('model') in (None, '')
+
+
+def test_read_run_id_marker_sanitizes_a_path_traversal_session_id(tmp_path):
+    """A session id read from spooled JSON is untrusted input: a crafted
+    `../`-style value must not let `_read_run_id_marker` escape the
+    `sessions/` directory to read an arbitrary file elsewhere on disk.
+    """
+    agentmaster_dir = tmp_path / '.agentmaster'
+    spool_dir = agentmaster_dir / 'events'
+    spool_dir.mkdir(parents=True)
+
+    secret = tmp_path / 'secret.run_id'
+    secret.write_text('escaped-run-id', encoding='utf-8')
+
+    malicious_session_id = '../../../secret'
+
+    # The sanitized marker path (this session id collapses to a single
+    # segment) has no marker written -- so nothing is read back, proving
+    # the raw traversal path was never followed.
+    assert _read_run_id_marker(spool_dir, malicious_session_id) is None
+
+    sanitized_dir = agentmaster_dir / 'sessions' / '.._.._.._secret'
+    sanitized_dir.mkdir(parents=True)
+    (sanitized_dir / '.run_id').write_text('sanitized-run-id', encoding='utf-8')
+
+    assert _read_run_id_marker(spool_dir, malicious_session_id) == 'sanitized-run-id'
+
+
+def test_resolve_run_preferring_marker_ignores_a_marker_naming_an_ended_run(tmp_path):
+    """A stale `.run_id` marker pointing at an already-ENDED RUN must not
+    reattach new AGENT_SESSION/MODEL_CALL rows to that finished run -- a
+    fresh open RUN must be used instead.
+    """
+    ledger_path = tmp_path / 'ledger.sqlite3'
+    connection = connect_ledger(ledger_path)
+    migrate_ledger(connection)
+
+    now = lambda: '2026-07-21T00:00:00Z'  # noqa: E731
+    counter = iter(f'id-{n}' for n in range(100))
+    id_factory = lambda: next(counter)  # noqa: E731
+
+    project_id = resolve_project(
+        connection, canonical_root=str(tmp_path), id_factory=id_factory, now=now
+    )
+    user_session_id = upsert_user_session(
+        connection, 'sess-1', id_factory=id_factory, now=now
+    )
+    ended_run_id = id_factory()
+    connection.execute(
+        'INSERT INTO RUN '
+        '(id, project_id, user_session_id, delivery_mode, state, started_at, ended_at) '
+        "VALUES (?, ?, ?, 'local', 'Complete', ?, ?)",
+        (ended_run_id, project_id, user_session_id, now(), now()),
+    )
+    connection.commit()
+
+    workspace = tmp_path / 'workspace'
+    spool_dir = workspace / '.agentmaster' / 'events'
+    spool_dir.mkdir(parents=True)
+    session_marker_dir = workspace / '.agentmaster' / 'sessions' / 'sess-1'
+    session_marker_dir.mkdir(parents=True)
+    (session_marker_dir / '.run_id').write_text(ended_run_id, encoding='utf-8')
+
+    event = SpooledEvent(
+        path=tmp_path / 'event.json',
+        kind='agent_session',
+        harness_session_id='sess-1',
+        fields={},
+    )
+
+    resolved_run_id = _resolve_run_preferring_marker(
+        connection,
+        event,
+        spool_dir,
+        _RunResolutionContext(
+            project_id=project_id,
+            user_session_id=user_session_id,
+            id_factory=id_factory,
+            now=now,
+        ),
+    )
+    connection.close()
+
+    assert resolved_run_id != ended_run_id

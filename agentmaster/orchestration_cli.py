@@ -39,7 +39,7 @@ from ledger.orchestrator_state import (
     transition_run,
     transition_task,
 )
-from ledger.transactions import run_write_transaction
+from ledger.transactions import BusyRetriesExhaustedError, run_write_transaction
 
 if TYPE_CHECKING:
     import argparse
@@ -70,6 +70,37 @@ def _report_integrity_error(error: sqlite3.IntegrityError) -> int:
     """
     _emit({'error': str(error)})
     return 1
+
+
+def _report_ledger_error(error: sqlite3.Error | BusyRetriesExhaustedError) -> int:
+    """A genuine transition write failed (BUSY retries exhausted, or another
+    `sqlite3.Error`) -- fail closed with a JSON error rather than a traceback.
+    """
+    _emit({'error': str(error)})
+    return 1
+
+
+def _guard_transition(operation: Callable[[], int]) -> int:
+    """Run a RUN/TASK transition `operation`, mapping ledger errors to a
+    closed JSON error instead of letting them surface as a raw traceback.
+
+    Shared by every `cmd_*` transition/dispatch command below (previously a
+    copy-pasted 3-branch except cascade in each). `sqlite3.IntegrityError` is
+    caught ahead of the broader `sqlite3.Error` it subclasses. The
+    `sqlite3.Error`/`BusyRetriesExhaustedError` branch only ever reports a
+    genuine transition failure: `_retire_run_id_marker`'s best-effort cleanup
+    already swallows its own errors internally and never reaches here.
+    """
+    try:
+        return operation()
+    except (RunNotFoundError, TaskNotFoundError) as error:
+        return _report_not_found(error)
+    except IllegalTransitionError as error:
+        return _report_illegal_transition(error)
+    except sqlite3.IntegrityError as error:
+        return _report_integrity_error(error)
+    except (sqlite3.Error, BusyRetriesExhaustedError) as error:
+        return _report_ledger_error(error)
 
 
 def _write_run_id_marker(
@@ -119,13 +150,13 @@ def _retire_run_id_marker(
     """
     if to_state not in RUN_TERMINAL_STATES:
         return
-    location = _session_and_root_for_run(connection, run_id)
-    if location is None:
-        return
-    harness_session_id, canonical_root = location
-    sdir = session_dir({'session_id': harness_session_id, 'cwd': canonical_root})
-    marker = sdir / '.run_id'
-    with contextlib.suppress(OSError):
+    with contextlib.suppress(sqlite3.Error, OSError):
+        location = _session_and_root_for_run(connection, run_id)
+        if location is None:
+            return
+        harness_session_id, canonical_root = location
+        sdir = session_dir({'session_id': harness_session_id, 'cwd': canonical_root})
+        marker = sdir / '.run_id'
         if marker.read_text(encoding='utf-8').strip() == run_id:
             marker.unlink(missing_ok=True)
 
@@ -231,7 +262,8 @@ def cmd_run_preflight(args: argparse.Namespace) -> int:
                 for raw in args.check
             )
         ]
-        try:
+
+        def _op() -> int:
             result = run_preflight(
                 connection,
                 args.run_id,
@@ -239,20 +271,19 @@ def cmd_run_preflight(args: argparse.Namespace) -> int:
                 now=_now(),
                 id_factory=lambda: str(uuid.uuid4()),
             )
-        except (RunNotFoundError, TaskNotFoundError) as error:
-            return _report_not_found(error)
-        except IllegalTransitionError as error:
-            return _report_illegal_transition(error)
+            _emit(asdict(result))
+            return 0 if result.passed else 1
+
+        return _guard_transition(_op)
     finally:
         connection.close()
-    _emit(asdict(result))
-    return 0 if result.passed else 1
 
 
 def cmd_run_transition(args: argparse.Namespace) -> int:
     connection = connect(Path(args.path))
     try:
-        try:
+
+        def _op() -> int:
             transition_run(
                 connection,
                 args.run_id,
@@ -262,14 +293,12 @@ def cmd_run_transition(args: argparse.Namespace) -> int:
                 ),
             )
             _retire_run_id_marker(connection, args.run_id, args.to_state)
-        except (RunNotFoundError, TaskNotFoundError) as error:
-            return _report_not_found(error)
-        except IllegalTransitionError as error:
-            return _report_illegal_transition(error)
+            _emit({'run_id': args.run_id, 'state': args.to_state})
+            return 0
+
+        return _guard_transition(_op)
     finally:
         connection.close()
-    _emit({'run_id': args.run_id, 'state': args.to_state})
-    return 0
 
 
 def cmd_run_recover(args: argparse.Namespace) -> int:
@@ -356,7 +385,8 @@ def cmd_task_register(args: argparse.Namespace) -> int:
 def cmd_task_transition(args: argparse.Namespace) -> int:
     connection = connect(Path(args.path))
     try:
-        try:
+
+        def _op() -> int:
             transition_task(
                 connection,
                 args.task_id,
@@ -368,16 +398,12 @@ def cmd_task_transition(args: argparse.Namespace) -> int:
                     lease_agent_session_id=args.lease_agent_session_id,
                 ),
             )
-        except (RunNotFoundError, TaskNotFoundError) as error:
-            return _report_not_found(error)
-        except IllegalTransitionError as error:
-            return _report_illegal_transition(error)
-        except sqlite3.IntegrityError as error:
-            return _report_integrity_error(error)
+            _emit({'task_id': args.task_id, 'state': args.to_state})
+            return 0
+
+        return _guard_transition(_op)
     finally:
         connection.close()
-    _emit({'task_id': args.task_id, 'state': args.to_state})
-    return 0
 
 
 def cmd_task_record_evidence(args: argparse.Namespace) -> int:
@@ -416,7 +442,8 @@ def cmd_task_record_evidence(args: argparse.Namespace) -> int:
 def cmd_dispatch_acquire(args: argparse.Namespace) -> int:
     connection = connect(Path(args.path))
     try:
-        try:
+
+        def _op() -> int:
             transition_task(
                 connection,
                 args.task_id,
@@ -428,26 +455,23 @@ def cmd_dispatch_acquire(args: argparse.Namespace) -> int:
                     lease_agent_session_id=args.lease_agent_session_id,
                 ),
             )
-        except (RunNotFoundError, TaskNotFoundError) as error:
-            return _report_not_found(error)
-        except IllegalTransitionError as error:
-            return _report_illegal_transition(error)
-        except sqlite3.IntegrityError as error:
-            return _report_integrity_error(error)
+            _emit({
+                'task_id': args.task_id,
+                'state': 'running',
+                'lease_agent_session_id': args.lease_agent_session_id,
+            })
+            return 0
+
+        return _guard_transition(_op)
     finally:
         connection.close()
-    _emit({
-        'task_id': args.task_id,
-        'state': 'running',
-        'lease_agent_session_id': args.lease_agent_session_id,
-    })
-    return 0
 
 
 def cmd_dispatch_release(args: argparse.Namespace) -> int:
     connection = connect(Path(args.path))
     try:
-        try:
+
+        def _op() -> int:
             transition_task(
                 connection,
                 args.task_id,
@@ -456,11 +480,9 @@ def cmd_dispatch_release(args: argparse.Namespace) -> int:
                     now=_now(), id_factory=lambda: str(uuid.uuid4()), reason=args.reason
                 ),
             )
-        except (RunNotFoundError, TaskNotFoundError) as error:
-            return _report_not_found(error)
-        except IllegalTransitionError as error:
-            return _report_illegal_transition(error)
+            _emit({'task_id': args.task_id, 'state': args.to_state})
+            return 0
+
+        return _guard_transition(_op)
     finally:
         connection.close()
-    _emit({'task_id': args.task_id, 'state': args.to_state})
-    return 0

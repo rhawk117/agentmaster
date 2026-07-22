@@ -9,9 +9,11 @@ regardless of whether `run start` or a telemetry drain runs first).
 """
 
 import json
+import sqlite3
 
 import pytest
 
+import agentmaster.orchestration_cli as orchestration_cli
 from agentmaster.cli import main
 from ledger.connection import connect as connect_ledger
 from ledger.ingestion import resolve_project, resolve_run, upsert_user_session
@@ -557,6 +559,48 @@ def test_run_id_marker_untouched_by_a_non_terminal_transition(
 
     assert marker.is_file()
     assert marker.read_text(encoding='utf-8') == run_id
+
+
+def test_run_transition_succeeds_when_marker_retirement_db_query_raises(
+    ledger_path, project_root, capsys, monkeypatch
+):
+    """The transition already committed before best-effort marker retirement
+    runs -- a `sqlite3.Error` raised while looking up the marker's session
+    must not turn a successful, committed transition into a raw traceback.
+    The command must still return 0 with success JSON, and the RUN state
+    change must still be durable.
+    """
+    run_id = _start_run(ledger_path, project_root, capsys)
+
+    def _boom(_connection, _run_id):
+        raise sqlite3.OperationalError('database is locked')
+
+    monkeypatch.setattr(orchestration_cli, '_session_and_root_for_run', _boom)
+
+    exit_code = main([
+        'run',
+        'transition',
+        '--path',
+        str(ledger_path),
+        '--run-id',
+        run_id,
+        '--to-state',
+        'Cancelled',
+    ])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload == {'run_id': run_id, 'state': 'Cancelled'}
+
+    connection = connect_ledger(ledger_path)
+    try:
+        assert (
+            connection.execute(
+                'SELECT state FROM RUN WHERE id = ?', (run_id,)
+            ).fetchone()[0]
+            == 'Cancelled'
+        )
+    finally:
+        connection.close()
 
 
 def test_single_run_after_start_then_drain(ledger_path, project_root, capsys):

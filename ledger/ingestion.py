@@ -145,6 +145,20 @@ def resolve_run(
     return run_write_transaction(connection, _op)
 
 
+def _sanitize_session_id(raw: str) -> str:
+    """Make a harness session id safe as a single path segment.
+
+    Mirrors `hooklib._sanitize_session_id`: a session id read from spooled
+    JSON is untrusted input, so it must not be used to build a filesystem
+    path unsanitized -- a crafted `../`-style id must not escape the
+    sessions directory.
+    """
+    sid = raw.strip().replace('/', '_').replace('\\', '_')
+    if not sid or set(sid) == {'.'}:
+        return 'default'
+    return sid
+
+
 def _read_run_id_marker(spool_dir: Path, harness_session_id: str) -> str | None:
     """Read the session's `.run_id` marker, or `None` when absent/unreadable.
 
@@ -153,7 +167,12 @@ def _read_run_id_marker(spool_dir: Path, harness_session_id: str) -> str | None:
     (`hooklib.session_dir`'s layout), a sibling of `events/` under the same
     `.agentmaster` root.
     """
-    marker = spool_dir.parent / 'sessions' / harness_session_id / '.run_id'
+    marker = (
+        spool_dir.parent
+        / 'sessions'
+        / _sanitize_session_id(harness_session_id)
+        / '.run_id'
+    )
     try:
         text = marker.read_text(encoding='utf-8').strip()
     except OSError:
@@ -184,13 +203,15 @@ def _resolve_run_preferring_marker(
     When an orchestrator RUN already names itself in the marker, drained
     AGENT_SESSION/MODEL_CALL rows must attach to that RUN rather than a
     second, ingestion-created one; `resolve_run`'s session-scoped open-RUN
-    lookup is only used as a fallback, when no marker exists or it names a
-    RUN that isn't there (never a hard error -- markers are best-effort).
+    lookup is only used as a fallback, when no marker exists, it names a RUN
+    that isn't there, or that RUN has already ended (never a hard error --
+    markers are best-effort). A stale marker pointing at an already-ENDED
+    RUN must not reattach new rows to a finished run.
     """
     preferred_run_id = _read_run_id_marker(spool_dir, event.harness_session_id)
     if preferred_run_id is not None:
         row = connection.execute(
-            'SELECT id FROM RUN WHERE id = ?', (preferred_run_id,)
+            'SELECT id FROM RUN WHERE id = ? AND ended_at IS NULL', (preferred_run_id,)
         ).fetchone()
         if row is not None:
             return row[0]
