@@ -288,7 +288,14 @@ def cmd_run_recover(args: argparse.Namespace) -> int:
 
 
 def _parse_depends_on(raw: str) -> tuple[str, str]:
-    task_id, _, kind = raw.partition(':')
+    """Split a `--depends-on` value into `(depends_on_task_id, kind)`.
+
+    Task ids may themselves contain colons (the default auto-generated form
+    is `task:{run_id}:{sequence_no}`), so a plain `:` cannot delimit the
+    optional dependency kind. `=` never appears in a task id, so it is used
+    instead; `raw` with no `=` is the whole task id with the default kind.
+    """
+    task_id, _, kind = raw.partition('=')
     return task_id, kind or 'blocks'
 
 
@@ -315,6 +322,20 @@ def cmd_task_register(args: argparse.Namespace) -> int:
         )
         for raw in args.depends_on:
             depends_on_task_id, kind = _parse_depends_on(raw)
+            # `INSERT OR IGNORE` also silently swallows a foreign-key
+            # violation (SQLite applies the statement's own conflict
+            # resolution -- not ABORT -- to FK failures too), so a dependency
+            # on a task that does not exist must be rejected here instead of
+            # being dropped without an error.
+            referenced = conn.execute(
+                'SELECT 1 FROM TASK WHERE id = ? AND run_id = ?',
+                (depends_on_task_id, args.run_id),
+            ).fetchone()
+            if referenced is None:
+                raise sqlite3.IntegrityError(
+                    f'--depends-on task {depends_on_task_id!r} does not exist '
+                    f'in run {args.run_id!r}'
+                )
             conn.execute(
                 'INSERT OR IGNORE INTO TASK_DEPENDENCY '
                 '(task_id, depends_on_task_id, dependency_kind) VALUES (?, ?, ?)',

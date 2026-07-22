@@ -60,9 +60,6 @@ def test_run_start_register_tasks_and_transition_lifecycle(
     run_id = run_payload['run_id']
     assert run_payload['created'] is True
 
-    # Explicit colon-free task ids: the auto-generated default
-    # (`task:{run_id}:{sequence_no}`) itself contains colons, which collides
-    # with `--depends-on`'s `TASK_ID[:KIND]` first-colon split.
     assert (
         main([
             'task',
@@ -98,7 +95,7 @@ def test_run_start_register_tasks_and_transition_lifecycle(
             '--sequence-no',
             '2',
             '--depends-on',
-            f'{task1_id}:blocks',
+            f'{task1_id}=blocks',
         ])
         == 0
     )
@@ -295,6 +292,180 @@ def test_single_run_after_drain_then_start(ledger_path, project_root, capsys):
             connection.execute(
                 'SELECT COUNT(*) FROM RUN WHERE user_session_id = ?',
                 (user_session_id,),
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        connection.close()
+
+
+def _start_run(ledger_path, project_root, capsys, harness_session_id='harness-1'):
+    assert (
+        main([
+            'run',
+            'start',
+            '--path',
+            str(ledger_path),
+            '--user-session-id',
+            harness_session_id,
+            '--project-root',
+            str(project_root),
+        ])
+        == 0
+    )
+    return json.loads(capsys.readouterr().out)['run_id']
+
+
+def test_depends_on_resolves_default_colon_bearing_task_id(
+    ledger_path, project_root, capsys
+):
+    """A dependency declared against a DEFAULT auto-generated task id (which
+    itself contains colons, `task:{run_id}:{sequence_no}`) must create the
+    correct `TASK_DEPENDENCY` row -- `--depends-on`'s `=`-delimited kind must
+    not be confused by colons inside the referenced task id.
+    """
+    run_id = _start_run(ledger_path, project_root, capsys)
+
+    assert (
+        main([
+            'task',
+            'register',
+            '--path',
+            str(ledger_path),
+            '--run-id',
+            run_id,
+            '--title',
+            'first task',
+            '--sequence-no',
+            '1',
+        ])
+        == 0
+    )
+    task1_id = json.loads(capsys.readouterr().out)['task_id']
+    assert task1_id == f'task:{run_id}:1'
+
+    assert (
+        main([
+            'task',
+            'register',
+            '--path',
+            str(ledger_path),
+            '--run-id',
+            run_id,
+            '--title',
+            'second task',
+            '--sequence-no',
+            '2',
+            '--depends-on',
+            task1_id,
+        ])
+        == 0
+    )
+    task2_id = json.loads(capsys.readouterr().out)['task_id']
+
+    connection = connect_ledger(ledger_path)
+    try:
+        row = connection.execute(
+            'SELECT depends_on_task_id, dependency_kind FROM TASK_DEPENDENCY '
+            'WHERE task_id = ?',
+            (task2_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert row == (task1_id, 'blocks')
+
+
+def test_depends_on_missing_task_fails_closed(ledger_path, project_root, capsys):
+    """A `--depends-on` referencing a task that does not exist must fail
+    loud -- non-zero exit, JSON `error` -- not be silently dropped by the
+    `INSERT OR IGNORE` (which also swallows foreign-key violations).
+    """
+    run_id = _start_run(ledger_path, project_root, capsys)
+
+    exit_code = main([
+        'task',
+        'register',
+        '--path',
+        str(ledger_path),
+        '--run-id',
+        run_id,
+        '--task-id',
+        'task-1',
+        '--title',
+        'first task',
+        '--sequence-no',
+        '1',
+        '--depends-on',
+        'task-does-not-exist',
+    ])
+    error_payload = json.loads(capsys.readouterr().out)
+    assert exit_code != 0
+    assert 'error' in error_payload
+
+    connection = connect_ledger(ledger_path)
+    try:
+        assert (
+            connection.execute('SELECT COUNT(*) FROM TASK_DEPENDENCY').fetchone()[0] == 0
+        )
+    finally:
+        connection.close()
+
+
+def test_depends_on_redeclaring_same_dependency_is_idempotent(
+    ledger_path, project_root, capsys
+):
+    """Re-registering the SAME valid `--depends-on` edge must stay
+    idempotent -- no duplicate `TASK_DEPENDENCY` row.
+    """
+    run_id = _start_run(ledger_path, project_root, capsys)
+
+    assert (
+        main([
+            'task',
+            'register',
+            '--path',
+            str(ledger_path),
+            '--run-id',
+            run_id,
+            '--task-id',
+            'task-1',
+            '--title',
+            'first task',
+            '--sequence-no',
+            '1',
+        ])
+        == 0
+    )
+    capsys.readouterr()
+
+    for _ in range(2):
+        assert (
+            main([
+                'task',
+                'register',
+                '--path',
+                str(ledger_path),
+                '--run-id',
+                run_id,
+                '--task-id',
+                'task-2',
+                '--title',
+                'second task',
+                '--sequence-no',
+                '2',
+                '--depends-on',
+                'task-1=blocks',
+            ])
+            == 0
+        )
+        capsys.readouterr()
+
+    connection = connect_ledger(ledger_path)
+    try:
+        assert (
+            connection.execute(
+                'SELECT COUNT(*) FROM TASK_DEPENDENCY WHERE task_id = ?',
+                ('task-2',),
             ).fetchone()[0]
             == 1
         )

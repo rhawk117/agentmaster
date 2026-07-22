@@ -1324,7 +1324,7 @@ def _build_task_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable
         '--depends-on',
         action='append',
         default=[],
-        help='DEPENDS_ON_TASK_ID[:DEPENDENCY_KIND]',
+        help='DEPENDS_ON_TASK_ID[=DEPENDENCY_KIND] (task ids may contain colons)',
     )
 
     task_transition_cmd = task_sub.add_parser(
