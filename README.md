@@ -224,6 +224,47 @@ re-running `agentmaster-retro` closes the loop. `evals/evals.json` carries a
 seeded-flaw fixture (`evals/fixtures/flawed-retro-corpus/`) exercising the
 loop end to end, schema-checked in CI by `tests/test_evals.py`.
 
+## Installed runtime and automatic ledger ingestion
+
+Every install also copies a narrow runtime under `<agentmaster-home>/runtime/`
+(the same file set `scripts/release_bundle.py` ships in a release archive)
+and a launcher at `<agentmaster-home>/bin/agentmaster` pinning the resolved
+`>=3.14` interpreter — install fails closed if the interpreter is older. A
+per-target `runtime.json` descriptor sits beside the installed hooks
+(`~/.claude/agentmaster/runtime.json`, `~/.copilot/agentmaster-hooks/runtime.json`)
+naming the canonical config path, the launcher, the ledger path (or `null`
+when disabled), and the artifact directory. The standalone hooks read this
+descriptor relative to their own installed location — never the workspace
+`.agentmaster/config.toml` and never an import of `ledger` in-process — so
+they keep working even if the source checkout that installed them moves or
+is deleted.
+
+Spool events (`.agentmaster/events/*.json`, one committed hook payload each)
+drain into the ledger automatically at session start, Claude subagent stop,
+pre-compaction, and Copilot post-agent-tool — no manual `agentmaster ledger
+ingest-events` call is required for normal use. Each drain is bounded
+(`ledger ingest-events --limit`) so a single hook invocation can never absorb
+an unbounded backlog; a locked or unavailable ledger leaves the spool file in
+place for the next checkpoint to retry, and a committed event is only removed
+after its rows are durably written. Copilot's post-agent-tool hook spools the
+same normalized `agent_session` event Claude does, so both platforms populate
+identical ledger tables — missing token/model fields stay `NULL`, never `0`
+or invented.
+
+`agentmaster run start` reuses the open RUN for the current user session
+instead of creating a second one if a drain already auto-created one from
+spooled telemetry, and ingestion prefers the session's `.run_id` marker over
+its own session-scoped RUN lookup once that marker exists — so draining
+before or after `run start` always converges on exactly one RUN.
+
+Health checks are **row-based, never file-size-based**: `agentmaster ledger
+doctor --path <ledger> --json` and `agentmaster ledger query runs/tokens
+--path <ledger>` report schema version, journal mode, and actual RUN/TASK/
+MODEL_CALL rows. A growing or shrinking `ledger.sqlite3` file size proves
+nothing about ingestion correctness on its own (WAL checkpoints, vacuuming,
+and page reuse all change file size independent of row count) — inspect the
+rows.
+
 ## Claude Code hook layer
 
 Five lifecycle hooks convert protocol into mechanism, unique to Claude Code.

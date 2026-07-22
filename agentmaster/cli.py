@@ -1004,7 +1004,12 @@ def _build_ledger_subparser(sub: argparse._SubParsersAction) -> dict[str, Callab
     _add_path_argument(ingest_events_cmd)
     _add_json_argument(ingest_events_cmd)
     ingest_events_cmd.add_argument('--spool', required=True)
-    ingest_events_cmd.add_argument('--limit', type=int, default=None)
+    ingest_events_cmd.add_argument(
+        '--limit',
+        type=int,
+        default=None,
+        help='max spool events to ingest in this call (unbounded when omitted)',
+    )
 
     return {
         'init': _cmd_ledger_init,
@@ -1243,10 +1248,14 @@ def _build_worth_subparser(sub: argparse._SubParsersAction) -> dict[str, Callabl
 
 
 def _build_run_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
-    run_parser = sub.add_parser('run')
+    run_parser = sub.add_parser(
+        'run', help='start/resume, preflight, transition, and recover orchestrator RUNs'
+    )
     run_sub = run_parser.add_subparsers(dest='command', required=True)
 
-    start_cmd = run_sub.add_parser('start')
+    start_cmd = run_sub.add_parser(
+        'start', help='start a RUN, or reuse the open RUN for this user session'
+    )
     _add_path_argument(start_cmd)
     start_cmd.add_argument('--user-session-id', dest='harness_session_id', required=True)
     start_cmd.add_argument('--project-root', required=True)
@@ -1258,7 +1267,9 @@ def _build_run_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]
         choices=('local', 'commit', 'pull-request', 'merge'),
     )
 
-    preflight_cmd = run_sub.add_parser('preflight')
+    preflight_cmd = run_sub.add_parser(
+        'preflight', help='record preflight checks and transition to Executing/Blocked'
+    )
     _add_path_argument(preflight_cmd)
     preflight_cmd.add_argument('--run-id', required=True)
     preflight_cmd.add_argument(
@@ -1268,13 +1279,17 @@ def _build_run_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]
         help='NAME:true|false[:DETAIL], one per PREFLIGHT_CATEGORIES entry',
     )
 
-    transition_cmd = run_sub.add_parser('transition')
+    transition_cmd = run_sub.add_parser(
+        'transition', help='append a RUN state transition; rejects illegal transitions'
+    )
     _add_path_argument(transition_cmd)
     transition_cmd.add_argument('--run-id', required=True)
     transition_cmd.add_argument('--to-state', required=True)
     transition_cmd.add_argument('--reason', default=None)
 
-    recover_cmd = run_sub.add_parser('recover')
+    recover_cmd = run_sub.add_parser(
+        'recover', help='recover stale task leases and resume without duplicate dispatch'
+    )
     _add_path_argument(recover_cmd)
     recover_cmd.add_argument('--run-id', required=True)
 
@@ -1287,10 +1302,15 @@ def _build_run_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]
 
 
 def _build_task_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
-    task_parser = sub.add_parser('task')
+    task_parser = sub.add_parser(
+        'task',
+        help='register orchestrator TASK rows, transition them, and record evidence',
+    )
     task_sub = task_parser.add_subparsers(dest='command', required=True)
 
-    register_cmd = task_sub.add_parser('register')
+    register_cmd = task_sub.add_parser(
+        'register', help='register a TASK (and its dependencies) under a RUN'
+    )
     _add_path_argument(register_cmd)
     register_cmd.add_argument('--run-id', required=True)
     register_cmd.add_argument('--task-id', default=None)
@@ -1307,14 +1327,19 @@ def _build_task_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable
         help='DEPENDS_ON_TASK_ID[:DEPENDENCY_KIND]',
     )
 
-    task_transition_cmd = task_sub.add_parser('transition')
+    task_transition_cmd = task_sub.add_parser(
+        'transition', help='append a TASK state transition; rejects illegal transitions'
+    )
     _add_path_argument(task_transition_cmd)
     task_transition_cmd.add_argument('--task-id', required=True)
     task_transition_cmd.add_argument('--to-state', required=True)
     task_transition_cmd.add_argument('--reason', default=None)
     task_transition_cmd.add_argument('--lease-agent-session-id', default=None)
 
-    record_evidence_cmd = task_sub.add_parser('record-evidence')
+    record_evidence_cmd = task_sub.add_parser(
+        'record-evidence',
+        help='record verification evidence against a TASK and commit SHA',
+    )
     _add_path_argument(record_evidence_cmd)
     record_evidence_cmd.add_argument('--artifact-root', required=True)
     record_evidence_cmd.add_argument('--project-id', required=True)
@@ -1336,16 +1361,24 @@ def _build_task_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable
 
 
 def _build_dispatch_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
-    dispatch_parser = sub.add_parser('dispatch')
+    dispatch_parser = sub.add_parser(
+        'dispatch', help='acquire/release a TASK lease around implementer dispatch'
+    )
     dispatch_sub = dispatch_parser.add_subparsers(dest='command', required=True)
 
-    acquire_cmd = dispatch_sub.add_parser('acquire')
+    acquire_cmd = dispatch_sub.add_parser(
+        'acquire',
+        help='acquire a TASK lease before dispatch; transitions the TASK to running',
+    )
     _add_path_argument(acquire_cmd)
     acquire_cmd.add_argument('--task-id', required=True)
     acquire_cmd.add_argument('--lease-agent-session-id', required=True)
     acquire_cmd.add_argument('--reason', default=None)
 
-    release_cmd = dispatch_sub.add_parser('release')
+    release_cmd = dispatch_sub.add_parser(
+        'release',
+        help='release a TASK lease after dispatch and transition to the given state',
+    )
     _add_path_argument(release_cmd)
     release_cmd.add_argument('--task-id', required=True)
     release_cmd.add_argument('--to-state', required=True)
