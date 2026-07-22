@@ -10,12 +10,11 @@ them back together.
 
 import json
 import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from installer import agentmaster_config, claude_settings, managed_state
+from installer import agentmaster_config, claude_settings, managed_state, runtime
 from installer.actions import FilePlan, apply_plans, remove_paths
 from installer.config import (
     DEFAULT_ROLE_EFFORT,
@@ -86,7 +85,7 @@ def default_home() -> Path:
 
 
 def _interpreter() -> str:
-    return Path(sys.executable).as_posix()
+    return runtime.resolve_interpreter()
 
 
 def _preflight(root: Path, manifest: Manifest) -> None:
@@ -179,8 +178,9 @@ def _managed_plans(
     roles: ClaudeRoleConfig,
     resolved: ResolvedConfig,
     auto_compact: AutoCompactOverride,
+    launcher: Path,
 ) -> list[FilePlan]:
-    """Compute the settings.json / config.toml / owned-state.json plans.
+    """Compute the settings.json / config.toml / owned-state.json / runtime.json plans.
 
     Reads and shape-validates each existing file (failing closed on
     malformed content) before any write; the caller folds the result into
@@ -224,6 +224,11 @@ def _managed_plans(
     new_owned_state = new_owned_state.with_value(
         'claude', 'auto_compact', new_owned_auto_compact
     )
+    new_owned_state = new_owned_state.with_value(
+        'claude',
+        'runtime_dirs',
+        [str(agentmaster_home / 'runtime'), str(agentmaster_home / 'bin')],
+    )
 
     config_path = agentmaster_home / 'config.toml'
     config_plan = agentmaster_config.AgentmasterConfigPlan(
@@ -244,6 +249,14 @@ def _managed_plans(
         config_plan, existing_text=_read_text(config_path)
     )
 
+    descriptor = runtime.RuntimeDescriptor(
+        config_path=config_path,
+        launcher=launcher,
+        ledger_path=resolved.ledger_path if resolved.ledger_enabled else None,
+        ledger_enabled=resolved.ledger_enabled,
+        artifact_dir=resolved.artifact_path,
+    )
+
     return [
         FilePlan(
             content=json.dumps(new_settings, indent=2) + '\n', destination=settings_path
@@ -252,6 +265,7 @@ def _managed_plans(
         FilePlan(
             content=managed_state.render(new_owned_state), destination=owned_state_path
         ),
+        runtime.descriptor_plan(home / 'agentmaster' / 'runtime.json', descriptor),
     ]
 
 
@@ -301,11 +315,16 @@ def install(root: Path, home: Path, options: ClaudeInstallOptions) -> InstallRep
         options.manifest,
     )
     _preflight(root, manifest)
+    agentmaster_home = resolved.agentmaster_home.resolve()
+    interpreter = runtime.resolve_interpreter()
+    launcher = agentmaster_home / 'bin' / 'agentmaster'
     plans = [
         *_skill_plans(root, home, roles, manifest),
         *_agent_plans(root, home, roles, manifest),
         *_hook_plans(root, home, manifest),
-        *_managed_plans(home, roles, resolved, auto_compact),
+        *runtime.runtime_plans(root, agentmaster_home),
+        runtime.launcher_plan(agentmaster_home, interpreter),
+        *_managed_plans(home, roles, resolved, auto_compact, launcher),
     ]
     return apply_plans(plans, backup_root=home, dry_run=resolved.dry_run)
 
@@ -325,11 +344,16 @@ def uninstall(
     home = home.resolve()
     agentmaster_home = agentmaster_home.resolve()
     stripped_settings = _strip_settings(home, agentmaster_home)
+    owned_state = managed_state.parse(_read_text(agentmaster_home / 'owned-state.json'))
+    runtime_dirs = owned_state.get('claude', 'runtime_dirs', [])
+    if not isinstance(runtime_dirs, list):
+        runtime_dirs = []
 
     paths = [home / 'skills' / skill for skill in manifest.claude_skills]
     paths += [home / 'agents' / f'{worker}.md' for worker in manifest.workers]
     paths += [home / 'agents' / f'{agent}.md' for agent in manifest.claude_only_agents]
     paths.append(home / 'agentmaster')
+    paths += [Path(entry) for entry in runtime_dirs if isinstance(entry, str)]
     report = remove_paths(paths, dry_run=dry_run)
 
     if not dry_run and stripped_settings is not None:

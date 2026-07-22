@@ -11,10 +11,11 @@ config that participates in the same classify/backup/dry-run pass.
 
 import json
 import os
-import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from installer import managed_state, runtime
 from installer.actions import FilePlan, apply_plans, remove_paths
 from installer.frontmatter import update_frontmatter
 from installer.manifest import MANIFEST
@@ -118,7 +119,7 @@ def _hook_plans(root: Path, home: Path, manifest: Manifest) -> list[FilePlan]:
 
 
 def _hook_entry(home: Path, hook: str) -> dict[str, object]:
-    interpreter = Path(sys.executable).as_posix()
+    interpreter = runtime.resolve_interpreter()
     hook_path = (home / 'agentmaster-hooks' / hook).as_posix()
     return {
         'type': 'command',
@@ -139,22 +140,53 @@ def _hooks_json(home: Path) -> str:
     return json.dumps(config, indent=2) + '\n'
 
 
-def install(
-    root: Path,
-    home: Path,
-    *,
-    roles: CopilotRoleConfig,
-    dry_run: bool,
-    manifest: Manifest = MANIFEST,
-) -> InstallReport:
+def _read_text(path: Path) -> str | None:
+    return path.read_text(encoding='utf-8') if path.exists() else None
+
+
+@dataclass(frozen=True, slots=True)
+class CopilotInstallOptions:
+    """Per-call Copilot installer inputs beyond the source root and target home."""
+
+    roles: CopilotRoleConfig
+    agentmaster_home: Path
+    ledger_path: Path | None
+    ledger_enabled: bool
+    artifact_path: Path
+    dry_run: bool
+    manifest: Manifest = MANIFEST
+
+
+def install(root: Path, home: Path, options: CopilotInstallOptions) -> InstallReport:
     """Install the agentmaster Copilot target into `home`.
 
     Verifies every source file exists before planning a single write, then
-    applies all agents, skills, hooks, and the hook config in one
+    applies all agents, skills, hooks, the hook config, the checkout-
+    independent runtime + launcher (under `agentmaster_home`), and the
+    `runtime.json` descriptor beside the installed hooks — all in one
     transactional pass backed up under `home`.
     """
     home = home.resolve()
+    roles, manifest = options.roles, options.manifest
+    agentmaster_home = options.agentmaster_home.resolve()
     _preflight(root, manifest)
+
+    interpreter = runtime.resolve_interpreter()
+    launcher = agentmaster_home / 'bin' / 'agentmaster'
+    owned_state = managed_state.parse(_read_text(agentmaster_home / 'owned-state.json'))
+    new_owned_state = owned_state.with_value(
+        'copilot',
+        'runtime_dirs',
+        [str(agentmaster_home / 'runtime'), str(agentmaster_home / 'bin')],
+    )
+    descriptor = runtime.RuntimeDescriptor(
+        config_path=agentmaster_home / 'config.toml',
+        launcher=launcher,
+        ledger_path=options.ledger_path if options.ledger_enabled else None,
+        ledger_enabled=options.ledger_enabled,
+        artifact_dir=options.artifact_path,
+    )
+
     plans = [
         *_worker_plans(root, home, roles, manifest),
         *_coordinator_plans(root, home, roles, manifest),
@@ -164,25 +196,45 @@ def install(
             content=_hooks_json(home),
             destination=home / 'hooks' / 'agentmaster.json',
         ),
+        *runtime.runtime_plans(root, agentmaster_home),
+        runtime.launcher_plan(agentmaster_home, interpreter),
+        runtime.descriptor_plan(home / 'agentmaster-hooks' / 'runtime.json', descriptor),
+        FilePlan(
+            content=managed_state.render(new_owned_state),
+            destination=agentmaster_home / 'owned-state.json',
+        ),
     ]
-    return apply_plans(plans, backup_root=home, dry_run=dry_run)
+    return apply_plans(plans, backup_root=home, dry_run=options.dry_run)
 
 
 def uninstall(
-    home: Path, *, dry_run: bool, manifest: Manifest = MANIFEST
+    home: Path,
+    *,
+    dry_run: bool,
+    agentmaster_home: Path,
+    manifest: Manifest = MANIFEST,
 ) -> InstallReport:
     """Remove the agentmaster Copilot target from `home`.
 
     Removes the 7 agent files, the 3 router-skill trees, the hook script
-    directory, and `home/hooks/agentmaster.json` only — other files under
-    `home/hooks/` are left untouched.
+    directory (including the `runtime.json` descriptor beside it), the
+    `home/hooks/agentmaster.json` config, and the installed runtime/launcher
+    under `agentmaster_home` — other files under `home/hooks/` and the
+    ledger/config/artifacts under `agentmaster_home` are left untouched.
     """
     home = home.resolve()
+    agentmaster_home = agentmaster_home.resolve()
+    owned_state = managed_state.parse(_read_text(agentmaster_home / 'owned-state.json'))
+    runtime_dirs = owned_state.get('copilot', 'runtime_dirs', [])
+    if not isinstance(runtime_dirs, list):
+        runtime_dirs = []
+
     agents = (*manifest.workers, *manifest.copilot_coordinators)
     paths = [
         *(home / 'agents' / f'{name}.agent.md' for name in agents),
         *(home / 'skills' / skill for skill in manifest.copilot_coordinators),
         home / 'agentmaster-hooks',
         home / 'hooks' / 'agentmaster.json',
+        *(Path(entry) for entry in runtime_dirs if isinstance(entry, str)),
     ]
     return remove_paths(paths, dry_run=dry_run)

@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from installer import claude, copilot
+from installer import claude, copilot, runtime
 from installer.config import (
     MODEL_RE,
     ClaudeRoleConfig,
@@ -338,9 +338,18 @@ def _cmd_install(args: argparse.Namespace) -> int:
             else:
                 roles = _resolve_copilot_roles(unresolved, is_tty=is_tty)
                 report = copilot.install(
-                    ROOT, home, roles=roles, dry_run=resolved.dry_run
+                    ROOT,
+                    home,
+                    copilot.CopilotInstallOptions(
+                        roles=roles,
+                        agentmaster_home=resolved.agentmaster_home,
+                        ledger_path=resolved.ledger_path,
+                        ledger_enabled=resolved.ledger_enabled,
+                        artifact_path=resolved.artifact_path,
+                        dry_run=resolved.dry_run,
+                    ),
                 )
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, runtime.UnsupportedInterpreterError) as error:
             print(f'{target}: install failed: {error}', file=sys.stderr)
             return 1
         _print_report(target, report)
@@ -360,7 +369,11 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
                     dry_run=resolved.dry_run,
                 )
             else:
-                report = copilot.uninstall(home, dry_run=resolved.dry_run)
+                report = copilot.uninstall(
+                    home,
+                    agentmaster_home=resolved.agentmaster_home,
+                    dry_run=resolved.dry_run,
+                )
         except OSError as error:
             print(f'{target}: uninstall failed: {error}', file=sys.stderr)
             return 1

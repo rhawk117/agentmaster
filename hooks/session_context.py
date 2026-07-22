@@ -7,6 +7,7 @@ def main() -> int:
     payload = hooklib.read_payload()
     root = hooklib.workspace(payload)
     sdir = hooklib.session_dir(payload)
+    hooklib.auto_drain(payload)
     print(
         f'agentmaster session workspace: {sdir.relative_to(root)}/ - write '
         '.phase, .starts/, and telemetry.md here this session; '

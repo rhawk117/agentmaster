@@ -214,6 +214,42 @@ python -m agentmaster ledger backup --path ~/.agentmaster/ledger.sqlite3 \
   --destination ~/.agentmaster/ledger-backup.sqlite3
 ```
 
+## v2.0.1: the ledger is now wired into the running loop
+
+v2.0.0 initialized the SQLite ledger but nothing during a live run actually
+read or wrote to it: hook payloads spooled to disk and sat there, and the
+execute skill had no `run`/`task`/`dispatch` command surface to record
+transitions. v2.0.1 is a same-schema repair (no new migration): it installs a
+checkout-independent runtime + launcher + `runtime.json` descriptor, auto-
+drains the spool into the ledger at safe checkpoints, and adds the
+`run start/preflight/transition/recover`, `task register/transition/
+record-evidence`, and `dispatch acquire/release` commands the execute skill
+now calls.
+
+- **One-time reinstall required.** `hooks/execute_stop.py` (the Stop gate
+  that blocks leaving an incomplete run) now resolves its configuration from
+  the installed `runtime.json` descriptor instead of a workspace
+  `<repo>/.agentmaster/config.toml`. An install from before v2.0.1 has no
+  descriptor on disk, so the Stop gate **fails open** (does not block) until
+  you rerun `python install.py install` (or `install.py install --target
+  claude|copilot`) to write it. There is no `--config-home` flag; the
+  descriptor derives from the existing `--agentmaster-home` / `--config` /
+  `--ledger-path` / `--no-ledger` flags.
+- **Stale `.sqlite` warning.** The canonical ledger path has always been
+  `~/.agentmaster/ledger.sqlite3` (`.sqlite3`, not `.sqlite`); there is no
+  legacy `.sqlite`-suffixed ledger format to migrate. If you find a stray
+  `ledger.sqlite` file in an agentmaster home, it was not written by
+  agentmaster and is safe to remove — it is never read.
+- **Spool recovery and replay.** A committed hook event lives at
+  `.agentmaster/events/<time_ns>-<pid>.json` until its rows are durably
+  ingested; if the ledger is locked or briefly unavailable, the hook exits 0
+  and leaves the file for the next checkpoint to retry — nothing is lost and
+  nothing partially commits. Force a manual drain any time with
+  `agentmaster ledger ingest-events --path <ledger> --spool
+  <workspace>/.agentmaster/events --limit <n>`; re-running it against an
+  already-ingested spool is idempotent (`INSERT OR IGNORE` plus unique
+  indexes) and inserts no duplicate rows.
+
 ## Known limitations
 
 - Provider-reported usage may be unavailable; when it is, monetary cost

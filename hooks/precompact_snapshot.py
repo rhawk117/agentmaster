@@ -47,6 +47,7 @@ def main() -> int:
                 'snapshot_dir': str(dst),
             },
         )
+        hooklib.auto_drain(payload)
     return 0
 
 

@@ -282,3 +282,49 @@ def test_cli_install_ledger_path_and_artifact_dir_are_resolved(
     assert artifact_dir.is_dir()
     assert str(ledger_path) in result.stdout
     assert str(artifact_dir) in result.stdout
+
+
+@pytest.mark.subprocess
+@pytest.mark.integration
+def test_cli_install_runtime_descriptor_reflects_config_and_ledger_path_overrides(
+    tmp_path, run_cli, repo_root
+):
+    """Runtime descriptor contract (scenario 7): `--config` and
+    `--ledger-path` must propagate into the installed runtime descriptor's
+    `config_path`/`ledger_path` fields, not just into the resolved config on
+    disk. Red today because the installer emits no `runtime.json` at all
+    (T2 not yet implemented).
+    """
+    claude_home = tmp_path / 'claude-home'
+    agentmaster_home = tmp_path / 'agentmaster-home'
+    config = tmp_path / 'custom-config.toml'
+    config.write_text('schema_version = 1\n', encoding='utf-8')
+    ledger_path = tmp_path / 'custom-ledger.sqlite3'
+
+    result = run_cli(
+        [
+            'install',
+            '--target',
+            'claude',
+            '--no-input',
+            '--agentmaster-home',
+            str(agentmaster_home),
+            '--config',
+            str(config),
+            '--ledger-path',
+            str(ledger_path),
+        ],
+        cwd=repo_root,
+        env_extra={'CLAUDE_CONFIG_DIR': str(claude_home)},
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    descriptor_path = claude_home / 'agentmaster' / 'runtime.json'
+    assert descriptor_path.is_file(), (
+        f'no runtime descriptor written at {descriptor_path}; '
+        '`--config`/`--ledger-path` have nowhere to propagate to '
+        '(T2 not yet implemented)'
+    )
+    descriptor = json.loads(descriptor_path.read_text(encoding='utf-8'))
+    assert descriptor['ledger_path'] == str(ledger_path)
