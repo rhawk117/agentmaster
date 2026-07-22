@@ -242,6 +242,86 @@ def test_recover_run_flags_retrospective_pending_as_resumable(ledger_connection)
 
 
 @pytest.mark.sqlite
+def test_recover_run_releases_a_stale_lease_between_dispatch_and_verification(
+    ledger_connection,
+):
+    """A coordinator killed after acquiring a task lease but before the RUN
+    reaches 'Verifying' leaves that task 'running' with a lease; recovery
+    must release it so a fresh dispatch can pick the task back up, never
+    re-dispatching it while the stale lease is still held.
+    """
+    seed = seed_project_run_task(ledger_connection)
+    _seed_agent_session(ledger_connection, seed.run_id, 'agent-session-1')
+    _advance_run(ledger_connection, seed.run_id, 'Preflight', 'Executing')
+    transition_task(
+        ledger_connection,
+        'task-1',
+        'running',
+        TaskTransitionInput(
+            now=_now(), id_factory=_id, lease_agent_session_id='agent-session-1'
+        ),
+    )
+    _advance_run(ledger_connection, seed.run_id, 'Verifying')
+
+    report = recover_run(ledger_connection, seed.run_id, now=_now(), id_factory=_id)
+
+    assert report.requires_user_direction is False
+    assert report.released_task_ids == ('task-1',)
+    row = ledger_connection.execute(
+        'SELECT state, lease_agent_session_id FROM TASK WHERE id = ?', ('task-1',)
+    ).fetchone()
+    assert row == ('blocked', None)
+
+
+@pytest.mark.sqlite
+def test_resume_after_recovery_dispatches_the_released_task_exactly_once(
+    ledger_connection,
+):
+    """After recovery releases a stale lease, resuming dispatch (blocked ->
+    ready -> running with a new lease) must not create a second TASK row or
+    a duplicate 'running' lease -- exactly one task, one live lease.
+    """
+    seed = seed_project_run_task(ledger_connection)
+    _seed_agent_session(ledger_connection, seed.run_id, 'agent-session-1')
+    _seed_agent_session(ledger_connection, seed.run_id, 'agent-session-2')
+    _advance_run(ledger_connection, seed.run_id, 'Preflight', 'Executing')
+    transition_task(
+        ledger_connection,
+        'task-1',
+        'running',
+        TaskTransitionInput(
+            now=_now(), id_factory=_id, lease_agent_session_id='agent-session-1'
+        ),
+    )
+
+    recover_run(ledger_connection, seed.run_id, now=_now(), id_factory=_id)
+
+    transition_task(
+        ledger_connection,
+        'task-1',
+        'ready',
+        TaskTransitionInput(now=_now(), id_factory=_id),
+    )
+    transition_task(
+        ledger_connection,
+        'task-1',
+        'running',
+        TaskTransitionInput(
+            now=_now(), id_factory=_id, lease_agent_session_id='agent-session-2'
+        ),
+    )
+
+    task_count = ledger_connection.execute(
+        'SELECT COUNT(*) FROM TASK WHERE run_id = ?', (seed.run_id,)
+    ).fetchone()[0]
+    assert task_count == 1
+    row = ledger_connection.execute(
+        'SELECT state, lease_agent_session_id FROM TASK WHERE id = ?', ('task-1',)
+    ).fetchone()
+    assert row == ('running', 'agent-session-2')
+
+
+@pytest.mark.sqlite
 def test_recover_run_is_a_no_op_when_nothing_needs_reconciling(ledger_connection):
     seed = seed_project_run_task(ledger_connection)
     _advance_run(ledger_connection, seed.run_id, 'Preflight', 'Executing')

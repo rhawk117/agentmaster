@@ -6,21 +6,29 @@ RETROSPECTIVE_PENDING for the selected delivery mode... [and] must not
 recursively relaunch after a configured retry ceiling." Hook processes run
 standalone, copied without the `ledger` package (see hooks/hooklib.py's
 `spool_event`), so this reads the ledger sqlite file directly with the
-stdlib `sqlite3`/`tomllib` modules rather than importing `ledger.*`; on any
-missing marker, missing ledger, or read error it fails open (exits 0) rather
-than ever blocking a stop it cannot actually verify.
+stdlib `sqlite3` module rather than importing `ledger.*`; on any missing
+descriptor, disabled ledger, missing marker, missing ledger file, or read
+error it fails open (exits 0) rather than ever blocking a stop it cannot
+actually verify. The ledger path comes from the installed runtime descriptor
+(`hooklib.load_runtime_descriptor`, resolved relative to this hook's own
+installed location), never from a workspace-relative `config.toml` -- that
+path need not exist in a real installed layout.
 
 `BLOCKING_STATES` duplicates `ledger.orchestrator_state.
-BLOCKING_COMPLETION_STATES` (the source of truth) for the same reason.
+BLOCKING_COMPLETION_STATES` (the source of truth) for the same reason;
+`tests/test_execute_stop_hook.py` asserts the two stay in lockstep.
 """
 
 import contextlib
+import json
 import sqlite3
 import sys
-import tomllib
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import hooklib
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BLOCKING_STATES = frozenset({
     'ReviewRequired',
@@ -32,13 +40,15 @@ BLOCKING_STATES = frozenset({
 MAX_STOP_RETRIES = 3
 
 
-def _ledger_path(payload: dict) -> Path | None:
-    config_path = hooklib.workspace(payload) / '.agentmaster' / 'config.toml'
+def _ledger_path() -> Path | None:
     # Broad by design (hooklib.py's own read_payload/spool_event convention):
-    # any parse failure means "can't verify", which fails open, not closed.
+    # any lookup failure or disabled ledger means "can't verify", which fails
+    # open, not closed.
     with contextlib.suppress(Exception):
-        document = tomllib.loads(config_path.read_text(encoding='utf-8'))
-        return Path(document['paths']['ledger'])
+        descriptor = hooklib.load_runtime_descriptor()
+        if descriptor is None or not descriptor.ledger_enabled:
+            return None
+        return descriptor.ledger_path
     return None
 
 
@@ -78,9 +88,31 @@ def _retry_count(payload: dict) -> int:
     return 0
 
 
+def _record_retries_exhausted(payload: dict, *, run_id: str, state: str) -> None:
+    """Make the retry ceiling observable via `hook-debug.jsonl`.
+
+    The hook only ever opens the ledger read-only (`_run_state`'s `mode=ro`
+    URI), so it cannot append a RECOVERY_EVENT row itself; this mirrors
+    `hooklib.auto_drain`'s existing debug-only observability convention
+    instead of granting a standalone, untrusted process ledger write access.
+    """
+    with contextlib.suppress(Exception):
+        am = hooklib.agentmaster_dir(payload)
+        with (am / 'hook-debug.jsonl').open('a') as f:
+            f.write(
+                json.dumps({
+                    'stop_hook_retries_exhausted': True,
+                    'run_id': run_id,
+                    'state': state,
+                    'max_retries': MAX_STOP_RETRIES,
+                })
+                + '\n'
+            )
+
+
 def main() -> int:
     payload = hooklib.read_payload()
-    ledger_path = _ledger_path(payload)
+    ledger_path = _ledger_path()
     if ledger_path is None or not ledger_path.is_file():
         return 0
     run_id = _run_id(payload)
@@ -96,6 +128,7 @@ def main() -> int:
         # Idempotent, non-recursive: stop retrying after the ceiling and let
         # the session end, surfacing the gate as still open rather than
         # relaunching indefinitely.
+        _record_retries_exhausted(payload, run_id=run_id, state=state)
         sys.stderr.write(
             f'agentmaster execute stop hook: run {run_id} is still {state} after '
             f'{MAX_STOP_RETRIES} retries; not blocking again. The review/merge gate '

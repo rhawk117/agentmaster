@@ -39,6 +39,13 @@ workspace write you make yourself; the cost-boundary hook exempts
 `.agentmaster/`. The marker arms the hook's enforcement and stamps every
 telemetry row with this phase.
 
+Immediately after, call `agentmaster run start` (or, when resuming an
+interrupted session, `agentmaster run recover` then `run start`) so the RUN
+this dispatch belongs to is durable before any work happens, then
+`agentmaster run preflight` with a check per `PREFLIGHT_CATEGORIES` entry —
+a failing preflight persists `Blocked` and this phase ends there rather than
+dispatching anything.
+
 Read the plan file. This is the one direct read you make; it is your working
 document. Confirm the plan carries what safe dispatch requires: parallel
 groups with disjoint file ownership, per-task verification commands, `Uses:`
@@ -96,6 +103,46 @@ procedure-version evaluation.
 
 ## Phase 2 — Dispatch
 
+Each phase here persists through the durable RUN/TASK command surface, never
+through prose bookkeeping alone:
+
+<!-- agentmaster:execute-orchestration:start -->
+Orchestration calls — every execute run persists its RUN/TASK lifecycle
+through `agentmaster run`/`task`/`dispatch`, never through prose bookkeeping
+alone:
+
+- `agentmaster run start --user-session-id <harness-session-id> --project-root
+  <root> [--plan-id --base-sha --delivery-mode]` at Phase 1, before any
+  dispatch. It reuses this session's existing open RUN if one exists
+  (idempotent resume, never a second RUN) and atomically writes the RUN id
+  to the session's `.run_id` marker so ledger ingestion attaches to the same
+  RUN.
+- `agentmaster run preflight --run-id <id> --check NAME:true|false[:DETAIL]`
+  once per `PREFLIGHT_CATEGORIES` entry, persisting `Executing` or `Blocked`
+  before Phase 2 dispatch begins.
+- `agentmaster task register --run-id <id> --title --sequence-no
+  [--depends-on TASK_ID:KIND]` once per plan task, in plan order, so the
+  task graph and its dependencies are durable before any lease is acquired.
+- `agentmaster dispatch acquire --task-id <id> --lease-agent-session-id <id>`
+  immediately before dispatching an implementer for that task, and
+  `agentmaster dispatch release --task-id <id> --to-state <state>`
+  immediately after it returns (`review-required`, `blocked`, `failed`, or
+  `complete`).
+- `agentmaster task record-evidence --task-id --run-id --project-id
+  --artifact-root --evidence-kind --exit-code [--commit-sha]` for every
+  verification command a task's report claims passed.
+- `agentmaster run transition --run-id <id> --to-state <state>` to move the
+  RUN into `Verifying`, `FixesRequired`, `DeliveryPending`/review states,
+  `RetrospectivePending`, `Complete`, or `Failed` as each gate resolves.
+- `agentmaster run recover --run-id <id>` before resuming an interrupted run,
+  releasing any stale task lease and recording the recovery decision, never
+  re-dispatching a task whose lease recovery did not release.
+
+Every one of these commands validates current state and fails closed
+(non-zero exit, JSON `{"error": ...}`) on an illegal transition or unmet
+precondition — the prompt is never the source of truth for RUN/TASK state.
+<!-- agentmaster:execute-orchestration:end -->
+
 Honor the plan's execution mode. Sequential (the default): dispatch one
 `implementer` with the first group; when its report returns, resume that
 same implementer with the next group, so the conventions it established
@@ -110,6 +157,14 @@ summarize, reorder, or "improve" plan tasks in the dispatch — the plan
 already survived an adversarial critique; fidelity is the job.
 
 ## Phase 3 — Collect
+
+Before dispatching each group's implementer, `agentmaster task register`
+every task in that group (in plan order, with its dependencies) if not
+already registered, then `agentmaster dispatch acquire` its lease. When the
+implementer's report returns, `agentmaster task record-evidence` for each
+verification command it ran, then `agentmaster dispatch release` to the
+state the report earned (`review-required` on success, `blocked` or
+`failed` otherwise, up to the plan's retry ceiling).
 
 As group reports return: a report of a plan mismatch or an ownership conflict
 stops that group there — do not improvise a redesign; surface it with the
@@ -132,8 +187,12 @@ to the review. Then proceed to review.
 
 ## Phase 4 — Chain the review
 
-Invoke the `agentmaster-review` skill on the completed changes, passing the
-plan path so conformance is checkable. It elevates itself to the frontier
+Once every group's tasks are `complete`, `agentmaster run transition
+--to-state Verifying`, then transition on to `DeliveryPending`/CI/review
+states as delivery proceeds, and to `RetrospectivePending` then `Complete`
+once the review/merge gate resolves — the RUN's terminal state, never a
+prose summary alone. Invoke the `agentmaster-review` skill on the completed
+changes, passing the plan path so conformance is checkable. It elevates itself to the frontier
 model and performs the full review — correctness, bugs, and regressions;
 structure quality (SOLID, YAGNI, DRY); testability; flexibility to change;
 security — and it owns the fix loop: fix tasks it emits go to implementers

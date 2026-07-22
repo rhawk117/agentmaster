@@ -27,6 +27,7 @@ RUNTIME_PATHS = (
     'hooks',
     'criteria',
     'scripts/telemetry_report.py',
+    'scripts/release_bundle.py',
     'README.md',
     'LICENSE',
     'pyproject.toml',

@@ -16,6 +16,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentmaster.orchestration_cli import (
+    cmd_dispatch_acquire,
+    cmd_dispatch_release,
+    cmd_run_preflight,
+    cmd_run_recover,
+    cmd_run_start,
+    cmd_run_transition,
+    cmd_task_record_evidence,
+    cmd_task_register,
+    cmd_task_transition,
+)
 from ledger import cli as ledger_cli
 from ledger.artifact_store import ArtifactStore
 from ledger.connection import connect, connect_read_only
@@ -238,6 +249,7 @@ def _cmd_ledger_ingest_events(args: argparse.Namespace) -> int:
             Path(args.spool),
             id_factory=lambda: str(uuid.uuid4()),
             now=_now,
+            limit=args.limit,
         )
     finally:
         connection.close()
@@ -992,6 +1004,12 @@ def _build_ledger_subparser(sub: argparse._SubParsersAction) -> dict[str, Callab
     _add_path_argument(ingest_events_cmd)
     _add_json_argument(ingest_events_cmd)
     ingest_events_cmd.add_argument('--spool', required=True)
+    ingest_events_cmd.add_argument(
+        '--limit',
+        type=int,
+        default=None,
+        help='max spool events to ingest in this call (unbounded when omitted)',
+    )
 
     return {
         'init': _cmd_ledger_init,
@@ -1229,6 +1247,149 @@ def _build_worth_subparser(sub: argparse._SubParsersAction) -> dict[str, Callabl
     }
 
 
+def _build_run_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
+    run_parser = sub.add_parser(
+        'run', help='start/resume, preflight, transition, and recover orchestrator RUNs'
+    )
+    run_sub = run_parser.add_subparsers(dest='command', required=True)
+
+    start_cmd = run_sub.add_parser(
+        'start', help='start a RUN, or reuse the open RUN for this user session'
+    )
+    _add_path_argument(start_cmd)
+    start_cmd.add_argument('--user-session-id', dest='harness_session_id', required=True)
+    start_cmd.add_argument('--project-root', required=True)
+    start_cmd.add_argument('--plan-id', default=None)
+    start_cmd.add_argument('--base-sha', default=None)
+    start_cmd.add_argument(
+        '--delivery-mode',
+        default='local',
+        choices=('local', 'commit', 'pull-request', 'merge'),
+    )
+
+    preflight_cmd = run_sub.add_parser(
+        'preflight', help='record preflight checks and transition to Executing/Blocked'
+    )
+    _add_path_argument(preflight_cmd)
+    preflight_cmd.add_argument('--run-id', required=True)
+    preflight_cmd.add_argument(
+        '--check',
+        action='append',
+        default=[],
+        help='NAME:true|false[:DETAIL], one per PREFLIGHT_CATEGORIES entry',
+    )
+
+    transition_cmd = run_sub.add_parser(
+        'transition', help='append a RUN state transition; rejects illegal transitions'
+    )
+    _add_path_argument(transition_cmd)
+    transition_cmd.add_argument('--run-id', required=True)
+    transition_cmd.add_argument('--to-state', required=True)
+    transition_cmd.add_argument('--reason', default=None)
+
+    recover_cmd = run_sub.add_parser(
+        'recover', help='recover stale task leases and resume without duplicate dispatch'
+    )
+    _add_path_argument(recover_cmd)
+    recover_cmd.add_argument('--run-id', required=True)
+
+    return {
+        'start': cmd_run_start,
+        'preflight': cmd_run_preflight,
+        'transition': cmd_run_transition,
+        'recover': cmd_run_recover,
+    }
+
+
+def _build_task_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
+    task_parser = sub.add_parser(
+        'task',
+        help='register orchestrator TASK rows, transition them, and record evidence',
+    )
+    task_sub = task_parser.add_subparsers(dest='command', required=True)
+
+    register_cmd = task_sub.add_parser(
+        'register', help='register a TASK (and its dependencies) under a RUN'
+    )
+    _add_path_argument(register_cmd)
+    register_cmd.add_argument('--run-id', required=True)
+    register_cmd.add_argument('--task-id', default=None)
+    register_cmd.add_argument('--parent-task-id', default=None)
+    register_cmd.add_argument('--title', required=True)
+    register_cmd.add_argument('--sequence-no', type=int, required=True)
+    register_cmd.add_argument('--risk-level', default=None)
+    register_cmd.add_argument('--acceptance-json', default=None)
+    register_cmd.add_argument('--required-evidence-json', default=None)
+    register_cmd.add_argument(
+        '--depends-on',
+        action='append',
+        default=[],
+        help='DEPENDS_ON_TASK_ID[=DEPENDENCY_KIND] (task ids may contain colons)',
+    )
+
+    task_transition_cmd = task_sub.add_parser(
+        'transition', help='append a TASK state transition; rejects illegal transitions'
+    )
+    _add_path_argument(task_transition_cmd)
+    task_transition_cmd.add_argument('--task-id', required=True)
+    task_transition_cmd.add_argument('--to-state', required=True)
+    task_transition_cmd.add_argument('--reason', default=None)
+    task_transition_cmd.add_argument('--lease-agent-session-id', default=None)
+
+    record_evidence_cmd = task_sub.add_parser(
+        'record-evidence',
+        help='record verification evidence against a TASK and commit SHA',
+    )
+    _add_path_argument(record_evidence_cmd)
+    record_evidence_cmd.add_argument('--artifact-root', required=True)
+    record_evidence_cmd.add_argument('--project-id', required=True)
+    record_evidence_cmd.add_argument('--run-id', required=True)
+    record_evidence_cmd.add_argument('--task-id', default=None)
+    record_evidence_cmd.add_argument('--criterion-id', default=None)
+    record_evidence_cmd.add_argument('--evidence-kind', required=True)
+    record_evidence_cmd.add_argument('--command', default=None)
+    record_evidence_cmd.add_argument('--exit-code', type=int, required=True)
+    record_evidence_cmd.add_argument('--commit-sha', default=None)
+    record_evidence_cmd.add_argument('--summary', default=None)
+    record_evidence_cmd.add_argument('--output-file', default='-')
+
+    return {
+        'register': cmd_task_register,
+        'transition': cmd_task_transition,
+        'record-evidence': cmd_task_record_evidence,
+    }
+
+
+def _build_dispatch_subparser(sub: argparse._SubParsersAction) -> dict[str, Callable]:
+    dispatch_parser = sub.add_parser(
+        'dispatch', help='acquire/release a TASK lease around implementer dispatch'
+    )
+    dispatch_sub = dispatch_parser.add_subparsers(dest='command', required=True)
+
+    acquire_cmd = dispatch_sub.add_parser(
+        'acquire',
+        help='acquire a TASK lease before dispatch; transitions the TASK to running',
+    )
+    _add_path_argument(acquire_cmd)
+    acquire_cmd.add_argument('--task-id', required=True)
+    acquire_cmd.add_argument('--lease-agent-session-id', required=True)
+    acquire_cmd.add_argument('--reason', default=None)
+
+    release_cmd = dispatch_sub.add_parser(
+        'release',
+        help='release a TASK lease after dispatch and transition to the given state',
+    )
+    _add_path_argument(release_cmd)
+    release_cmd.add_argument('--task-id', required=True)
+    release_cmd.add_argument('--to-state', required=True)
+    release_cmd.add_argument('--reason', default=None)
+
+    return {
+        'acquire': cmd_dispatch_acquire,
+        'release': cmd_dispatch_release,
+    }
+
+
 def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, dict[str, Callable]]]:
     parser = argparse.ArgumentParser(prog='agentmaster')
     sub = parser.add_subparsers(dest='group', required=True)
@@ -1240,6 +1401,9 @@ def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, dict[str, Callab
         'delivery': _build_delivery_subparser(sub),
         'retro': _build_retro_subparser(sub),
         'worth': _build_worth_subparser(sub),
+        'run': _build_run_subparser(sub),
+        'task': _build_task_subparser(sub),
+        'dispatch': _build_dispatch_subparser(sub),
     }
     return parser, groups
 

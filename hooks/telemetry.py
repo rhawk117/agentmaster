@@ -101,6 +101,7 @@ def main() -> int:
             'duration_ms': _to_int(duration_ms),
         },
     )
+    hooklib.auto_drain(payload)
     return 0
 
 
