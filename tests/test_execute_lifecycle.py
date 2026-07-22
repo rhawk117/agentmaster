@@ -302,6 +302,92 @@ def test_single_run_after_drain_then_start(ledger_path, project_root, capsys):
         connection.close()
 
 
+def test_run_id_marker_retires_on_terminal_completion(ledger_path, project_root, capsys):
+    """T5: once a RUN reaches a `RUN_TERMINAL_STATES` state, its session-scoped
+    `.run_id` marker must be removed so a later session (e.g. the Stop hook)
+    never blocks on a run that has already finished/failed/been cancelled.
+    """
+    assert (
+        main([
+            'run',
+            'start',
+            '--path',
+            str(ledger_path),
+            '--user-session-id',
+            'harness-1',
+            '--project-root',
+            str(project_root),
+        ])
+        == 0
+    )
+    run_id = json.loads(capsys.readouterr().out)['run_id']
+
+    marker = project_root / '.agentmaster' / 'sessions' / 'harness-1' / '.run_id'
+    assert marker.is_file()
+    assert marker.read_text(encoding='utf-8') == run_id
+
+    assert (
+        main([
+            'run',
+            'transition',
+            '--path',
+            str(ledger_path),
+            '--run-id',
+            run_id,
+            '--to-state',
+            'Cancelled',
+        ])
+        == 0
+    )
+    capsys.readouterr()
+
+    assert not marker.exists(), (
+        'a RUN reaching a terminal state (Cancelled) must retire its .run_id '
+        'marker, not leave it pointing at a finished run'
+    )
+
+
+def test_run_id_marker_untouched_by_a_non_terminal_transition(
+    ledger_path, project_root, capsys
+):
+    """Only a genuinely terminal transition retires the marker -- an
+    in-flight run must keep blocking a later Stop until it actually finishes.
+    """
+    assert (
+        main([
+            'run',
+            'start',
+            '--path',
+            str(ledger_path),
+            '--user-session-id',
+            'harness-1',
+            '--project-root',
+            str(project_root),
+        ])
+        == 0
+    )
+    run_id = json.loads(capsys.readouterr().out)['run_id']
+    marker = project_root / '.agentmaster' / 'sessions' / 'harness-1' / '.run_id'
+
+    assert (
+        main([
+            'run',
+            'transition',
+            '--path',
+            str(ledger_path),
+            '--run-id',
+            run_id,
+            '--to-state',
+            'Preflight',
+        ])
+        == 0
+    )
+    capsys.readouterr()
+
+    assert marker.is_file()
+    assert marker.read_text(encoding='utf-8') == run_id
+
+
 def test_single_run_after_start_then_drain(ledger_path, project_root, capsys):
     """RUN-reconciliation contract, ordering 2: `run start` first, then a
     telemetry drain (`ledger.ingestion.resolve_run`) for the same user

@@ -10,6 +10,7 @@ those don't provide: reusing an existing open RUN for a user session
 lookup and this CLI's own dispatch calls agree on exactly one RUN.
 """
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -29,6 +30,7 @@ from ledger.ingestion import resolve_project, upsert_user_session
 from ledger.orchestrator_preflight import PreflightCheck, run_preflight
 from ledger.orchestrator_recovery import recover_run
 from ledger.orchestrator_state import (
+    RUN_TERMINAL_STATES,
     IllegalTransitionError,
     RunNotFoundError,
     RunTransitionInput,
@@ -89,6 +91,43 @@ def _write_run_id_marker(
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
+
+
+def _session_and_root_for_run(
+    connection: sqlite3.Connection, run_id: str
+) -> tuple[str, str] | None:
+    """Return `(harness_session_id, canonical_root)` for `run_id`, or `None`."""
+    row = connection.execute(
+        'SELECT s.harness_session_id, p.canonical_root '
+        'FROM RUN r JOIN USER_SESSION s ON s.user_session_id = r.user_session_id '
+        'JOIN PROJECT p ON p.id = r.project_id WHERE r.id = ?',
+        (run_id,),
+    ).fetchone()
+    return (row[0], row[1]) if row is not None else None
+
+
+def _retire_run_id_marker(
+    connection: sqlite3.Connection, run_id: str, to_state: str
+) -> None:
+    """Remove this run's `.run_id` marker once it reaches a terminal state.
+
+    A later session (e.g. the Stop hook, `hooks/execute_stop.py`) must not
+    keep blocking on a run that has already finished, failed, or been
+    cancelled. Only unlinks the marker when its content still names this
+    run -- a marker already overwritten by a newer run must never be
+    retired by a stale caller finishing this one late.
+    """
+    if to_state not in RUN_TERMINAL_STATES:
+        return
+    location = _session_and_root_for_run(connection, run_id)
+    if location is None:
+        return
+    harness_session_id, canonical_root = location
+    sdir = session_dir({'session_id': harness_session_id, 'cwd': canonical_root})
+    marker = sdir / '.run_id'
+    with contextlib.suppress(OSError):
+        if marker.read_text(encoding='utf-8').strip() == run_id:
+            marker.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +261,7 @@ def cmd_run_transition(args: argparse.Namespace) -> int:
                     now=_now(), id_factory=lambda: str(uuid.uuid4()), reason=args.reason
                 ),
             )
+            _retire_run_id_marker(connection, args.run_id, args.to_state)
         except (RunNotFoundError, TaskNotFoundError) as error:
             return _report_not_found(error)
         except IllegalTransitionError as error:
