@@ -1,5 +1,3 @@
-"""Tests for the `agentmaster retro`/`agentmaster worth` CLI wiring (SPEC.md §19)."""
-
 import pytest
 from conftest import seed_project_run_task
 

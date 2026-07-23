@@ -1,11 +1,3 @@
-"""Tests for ledger-aware installer planning (SPEC.md §11, §15, §16.1).
-
-Covers `installer.config` ledger/artifact/delivery-mode/auto-compact
-resolution and `installer.ledger_bootstrap`'s idempotent, permission-safe,
-schema-aware placeholder bootstrap. CLI-surface (subprocess) coverage lives
-in tests/test_cli.py.
-"""
-
 import sqlite3
 import stat
 
@@ -90,13 +82,11 @@ def test_validate_ledger_flags_rejects_no_ledger_with_ledger_path(tmp_path):
 
 
 def test_validate_ledger_flags_accepts_no_ledger_alone():
-    validate_ledger_flags(_unresolved(no_ledger=True))  # no raise
+    validate_ledger_flags(_unresolved(no_ledger=True))
 
 
 def test_validate_ledger_flags_accepts_ledger_path_alone(tmp_path):
-    validate_ledger_flags(
-        _unresolved(ledger_path=tmp_path / 'ledger.sqlite3')
-    )  # no raise
+    validate_ledger_flags(_unresolved(ledger_path=tmp_path / 'ledger.sqlite3'))
 
 
 def _plan(tmp_path) -> LedgerBootstrapPlan:
@@ -124,7 +114,7 @@ def test_bootstrap_is_idempotent(tmp_path):
     plan = _plan(tmp_path)
 
     bootstrap(plan, dry_run=False)
-    bootstrap(plan, dry_run=False)  # no raise, no error re-creating
+    bootstrap(plan, dry_run=False)
 
     assert plan.ledger_path.is_file()
 
@@ -165,12 +155,10 @@ def test_validate_auto_compact_flags_rejects_percent_out_of_range():
 
 
 def test_validate_auto_compact_flags_accepts_boundary_values():
-    validate_auto_compact_flags(
-        _unresolved(target=Target.CLAUDE, auto_compact_percent=1)
-    )  # no raise
+    validate_auto_compact_flags(_unresolved(target=Target.CLAUDE, auto_compact_percent=1))
     validate_auto_compact_flags(
         _unresolved(target=Target.CLAUDE, auto_compact_percent=100)
-    )  # no raise
+    )
 
 
 def test_validate_auto_compact_flags_rejects_percent_with_clear():

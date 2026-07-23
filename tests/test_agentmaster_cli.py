@@ -1,5 +1,3 @@
-"""Tests for the unified `agentmaster` CLI's ledger/memory wiring (SPEC.md §19)."""
-
 import json
 
 import pytest

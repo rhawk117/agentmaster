@@ -1,5 +1,3 @@
-"""Tests for short write transactions with bounded BUSY retry (SPEC.md §16.1)."""
-
 import pytest
 
 from ledger.connection import connect

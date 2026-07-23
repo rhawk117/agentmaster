@@ -1,16 +1,3 @@
-"""One-shot import of pre-v2 Agentmaster artifacts (SPEC.md §19, §23 M17).
-
-Reads legacy `telemetry.md` rows (`.agentmaster/telemetry.md` and
-`.agentmaster/sessions/<id>/telemetry.md`, in the `phase,agent,model,tokens,
-duration_ms` shape `hooklib.append_telemetry` writes) and imports them as
-MODEL_CALL rows under a dedicated legacy AGENT_SESSION/RUN, one per source
-file. Original files are never modified or deleted; each imported file is
-registered as a redacted, content-addressed ARTIFACT for provenance. Import
-is idempotent (`INSERT OR IGNORE` keyed on a digest of each row's content),
-so running it twice never duplicates rows, and `apply=False` reports what
-would import without writing anything.
-"""
-
 import hashlib
 import json
 from dataclasses import dataclass
@@ -32,8 +19,6 @@ _LEGACY_ROOT_SESSION = 'legacy-root'
 
 @dataclass(frozen=True, slots=True)
 class LegacyImportRequest:
-    """Everything needed to import one legacy telemetry.md file (SPEC.md §23 M17)."""
-
     harness_session_id: str
     project_id: str
     id_factory: Callable[[], str]
@@ -43,8 +28,6 @@ class LegacyImportRequest:
 
 @dataclass(frozen=True, slots=True)
 class LegacyImportReport:
-    """Counts and provenance from one `import_telemetry_file` call."""
-
     source: Path
     imported: int
     ambiguous: int
@@ -54,13 +37,6 @@ class LegacyImportReport:
 
 
 def discover_legacy_telemetry_files(workspace: Path) -> list[tuple[Path, str]]:
-    """Return `(path, harness_session_id)` for every legacy telemetry.md file.
-
-    Session-scoped files (`.agentmaster/sessions/<id>/telemetry.md`) use
-    their directory name as the harness session id; the pre-session-scoping
-    root file (`.agentmaster/telemetry.md`) uses the `legacy-root` sentinel
-    so it never merges with a live hook's `default` session.
-    """
     am = workspace / '.agentmaster'
     found: list[tuple[Path, str]] = []
     sessions_dir = am / 'sessions'
@@ -83,12 +59,6 @@ def _parse_row(line: str) -> tuple[str, str, str, str, str] | None:
 
 
 def _to_optional_int(raw: str) -> tuple[int | None, bool]:
-    """Return `(value, is_ambiguous)`.
-
-    An empty field is `(None, False)` (SPEC.md §16.3: absence, not
-    fabrication); a non-empty, non-numeric field is `(None, True)` -
-    reported as ambiguous rather than silently coerced to a number.
-    """
     if raw == '':
         return None, False
     try:
@@ -143,13 +113,6 @@ def _register_legacy_artifact(
 def import_telemetry_file(
     connection: sqlite3.Connection, source_path: Path, request: LegacyImportRequest
 ) -> LegacyImportReport:
-    """Parse and (when `request.apply`) import one legacy telemetry.md file.
-
-    `apply=False` (dry-run) parses and reports without writing anything.
-    Re-running with `apply=True` on the same file is idempotent: every
-    MODEL_CALL id is a digest of that row's own content, so `INSERT OR
-    IGNORE` makes a second import of the same file a no-op.
-    """
     text = source_path.read_text(encoding='utf-8')
     redacted_bytes = redact(text.encode('utf-8'))
     was_redacted = redacted_bytes != text.encode('utf-8')
@@ -249,12 +212,6 @@ def import_legacy_workspace(
     now: Callable[[], str],
     apply: bool,
 ) -> list[LegacyImportReport]:
-    """Discover and import every legacy telemetry.md under `workspace`.
-
-    A single PROJECT row (by canonical root) backs every discovered file.
-    `apply=False` (dry-run) never resolves/creates that PROJECT row either -
-    dry-run must not write anything at all.
-    """
     project_id = (
         resolve_project(
             connection,

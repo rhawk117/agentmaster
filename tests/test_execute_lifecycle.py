@@ -1,13 +1,3 @@
-"""Durable RUN/TASK lifecycle through the execute command surface (scenario 5).
-
-`agentmaster/cli.py` now has a `run`/`task`/`dispatch` command group backed by
-`ledger.orchestrator_state.transition_run`/`transition_task`. These tests drive
-that real surface end to end and assert against the ledger DB directly: RUN/TASK
-rows, appended RUN_TRANSITION/TASK_TRANSITION rows, illegal-transition rejection,
-and the RUN-reconciliation contract (exactly one RUN per user session,
-regardless of whether `run start` or a telemetry drain runs first).
-"""
-
 import json
 import sqlite3
 
@@ -39,12 +29,6 @@ def project_root(tmp_path):
 def test_run_start_register_tasks_and_transition_lifecycle(
     ledger_path, project_root, capsys
 ):
-    """`run start` creates one RUN; task registration creates the expected
-    TASK rows + dependency; ready->running->review-required->complete and
-    Planned->Preflight->Executing->Verifying transitions append
-    RUN_TRANSITION/TASK_TRANSITION rows; an illegal transition on either is
-    rejected (non-zero, JSON `error` key, no state change).
-    """
     assert (
         main([
             'run',
@@ -194,8 +178,6 @@ def test_run_start_register_tasks_and_transition_lifecycle(
     finally:
         connection.close()
 
-    # Illegal TASK transition: task2 is still 'ready'; ready -> complete is
-    # not in TASK_TRANSITIONS['ready'].
     exit_code = main([
         'task',
         'transition',
@@ -210,9 +192,6 @@ def test_run_start_register_tasks_and_transition_lifecycle(
     assert exit_code != 0
     assert 'error' in error_payload
 
-    # Illegal RUN transition: Verifying -> Complete is not in
-    # RUN_TRANSITIONS['Verifying'] (only FixesRequired/DeliveryPending/
-    # Failed/Cancelled).
     exit_code = main([
         'run',
         'transition',
@@ -246,11 +225,6 @@ def test_run_start_register_tasks_and_transition_lifecycle(
 
 
 def test_single_run_after_drain_then_start(ledger_path, project_root, capsys):
-    """RUN-reconciliation contract, ordering 1: a telemetry drain that
-    auto-creates a session-scoped RUN (`ledger.ingestion.resolve_run`) must be
-    reused -- not duplicated -- by a subsequent `run start` for the same user
-    session. Asserted directly against the ledger DB: exactly one RUN row.
-    """
     now = lambda: '2026-07-21T00:00:00Z'  # noqa: E731
     counter = iter(f'id-{n}' for n in range(100))
     id_factory = lambda: next(counter)  # noqa: E731
@@ -321,11 +295,6 @@ def _start_run(ledger_path, project_root, capsys, harness_session_id='harness-1'
 def test_depends_on_resolves_default_colon_bearing_task_id(
     ledger_path, project_root, capsys
 ):
-    """A dependency declared against a DEFAULT auto-generated task id (which
-    itself contains colons, `task:{run_id}:{sequence_no}`) must create the
-    correct `TASK_DEPENDENCY` row -- `--depends-on`'s `=`-delimited kind must
-    not be confused by colons inside the referenced task id.
-    """
     run_id = _start_run(ledger_path, project_root, capsys)
 
     assert (
@@ -378,10 +347,6 @@ def test_depends_on_resolves_default_colon_bearing_task_id(
 
 
 def test_depends_on_missing_task_fails_closed(ledger_path, project_root, capsys):
-    """A `--depends-on` referencing a task that does not exist must fail
-    loud -- non-zero exit, JSON `error` -- not be silently dropped by the
-    `INSERT OR IGNORE` (which also swallows foreign-key violations).
-    """
     run_id = _start_run(ledger_path, project_root, capsys)
 
     exit_code = main([
@@ -416,9 +381,6 @@ def test_depends_on_missing_task_fails_closed(ledger_path, project_root, capsys)
 def test_depends_on_redeclaring_same_dependency_is_idempotent(
     ledger_path, project_root, capsys
 ):
-    """Re-registering the SAME valid `--depends-on` edge must stay
-    idempotent -- no duplicate `TASK_DEPENDENCY` row.
-    """
     run_id = _start_run(ledger_path, project_root, capsys)
 
     assert (
@@ -476,10 +438,6 @@ def test_depends_on_redeclaring_same_dependency_is_idempotent(
 
 
 def test_run_id_marker_retires_on_terminal_completion(ledger_path, project_root, capsys):
-    """T5: once a RUN reaches a `RUN_TERMINAL_STATES` state, its session-scoped
-    `.run_id` marker must be removed so a later session (e.g. the Stop hook)
-    never blocks on a run that has already finished/failed/been cancelled.
-    """
     assert (
         main([
             'run',
@@ -523,9 +481,6 @@ def test_run_id_marker_retires_on_terminal_completion(ledger_path, project_root,
 def test_run_id_marker_untouched_by_a_non_terminal_transition(
     ledger_path, project_root, capsys
 ):
-    """Only a genuinely terminal transition retires the marker -- an
-    in-flight run must keep blocking a later Stop until it actually finishes.
-    """
     assert (
         main([
             'run',
@@ -564,12 +519,6 @@ def test_run_id_marker_untouched_by_a_non_terminal_transition(
 def test_run_transition_succeeds_when_marker_retirement_db_query_raises(
     ledger_path, project_root, capsys, monkeypatch
 ):
-    """The transition already committed before best-effort marker retirement
-    runs -- a `sqlite3.Error` raised while looking up the marker's session
-    must not turn a successful, committed transition into a raw traceback.
-    The command must still return 0 with success JSON, and the RUN state
-    change must still be durable.
-    """
     run_id = _start_run(ledger_path, project_root, capsys)
 
     def _boom(_connection, _run_id):
@@ -604,10 +553,6 @@ def test_run_transition_succeeds_when_marker_retirement_db_query_raises(
 
 
 def test_single_run_after_start_then_drain(ledger_path, project_root, capsys):
-    """RUN-reconciliation contract, ordering 2: `run start` first, then a
-    telemetry drain (`ledger.ingestion.resolve_run`) for the same user
-    session, must still resolve to exactly one RUN row.
-    """
     assert (
         main([
             'run',

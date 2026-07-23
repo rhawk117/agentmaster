@@ -1,16 +1,3 @@
-"""Installed narrow runtime: source copy, launcher, and per-target descriptor.
-
-Decouples the installed hooks from the source checkout (evidence 12/13 in
-the ledger-runtime plan): `<agentmaster-home>/runtime/` holds a copy of the
-runtime sources (`scripts.release_bundle.RUNTIME_PATHS`, the same set the
-release archive bundles), `<agentmaster-home>/bin/agentmaster` is a narrow
-launcher pinning a >=3.14 interpreter and locating that copy relative to its
-own installed location, and a `runtime.json` descriptor beside each target's
-installed hooks (the Runtime descriptor contract) tells the standalone hooks
-where to find the canonical config/ledger/artifacts without ever importing
-`ledger` in-process.
-"""
-
 import json
 import sys
 from dataclasses import dataclass
@@ -27,20 +14,10 @@ SCHEMA_VERSION = 1
 MIN_PYTHON = (3, 14)
 
 
-class UnsupportedInterpreterError(RuntimeError):
-    """The interpreter resolved at install time is older than `MIN_PYTHON`."""
+class UnsupportedInterpreterError(RuntimeError): ...
 
 
 def resolve_interpreter() -> str:
-    """Return the abs path of the interpreter to pin the launcher to.
-
-    Raises
-    ------
-    UnsupportedInterpreterError
-        The running interpreter is older than the project's `>=3.14` floor;
-        pinning the launcher to it would silently break the installed hooks,
-        which rely on 3.14-only syntax (PEP 758).
-    """
     if sys.version_info[:2] < MIN_PYTHON:
         got = '.'.join(str(part) for part in sys.version_info[:2])
         wanted = '.'.join(str(part) for part in MIN_PYTHON)
@@ -52,17 +29,10 @@ def resolve_interpreter() -> str:
 
 
 def _is_source_file(path: Path) -> bool:
-    """True for a real tracked-style source file, never a bytecode cache artifact.
-
-    `git archive` (what the release bundle actually ships) only ever
-    includes tracked files, so it can't pick up `__pycache__/*.pyc`; walking
-    the live working tree here must reproduce that filter explicitly.
-    """
     return path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'
 
 
 def _iter_source_files(root: Path) -> Iterator[Path]:
-    """Yield every file under `root` named by `RUNTIME_PATHS`, deterministically."""
     for entry in RUNTIME_PATHS:
         source = root / entry
         if source.is_dir():
@@ -72,7 +42,6 @@ def _iter_source_files(root: Path) -> Iterator[Path]:
 
 
 def runtime_plans(root: Path, agentmaster_home: Path) -> list[FilePlan]:
-    """File plans copying the runtime sources under `<agentmaster_home>/runtime/`."""
     runtime_dir = agentmaster_home / 'runtime'
     return [
         FilePlan(
@@ -102,7 +71,6 @@ if __name__ == '__main__':
 
 
 def launcher_plan(agentmaster_home: Path, interpreter: str) -> FilePlan:
-    """The file plan for `<agentmaster_home>/bin/agentmaster`."""
     return FilePlan(
         content=_LAUNCHER_TEMPLATE.format(interpreter=interpreter),
         destination=agentmaster_home / 'bin' / 'agentmaster',
@@ -112,8 +80,6 @@ def launcher_plan(agentmaster_home: Path, interpreter: str) -> FilePlan:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeDescriptor:
-    """The Runtime descriptor contract fields, no secrets."""
-
     config_path: Path
     launcher: Path
     ledger_path: Path | None
@@ -136,5 +102,4 @@ class RuntimeDescriptor:
 
 
 def descriptor_plan(destination: Path, descriptor: RuntimeDescriptor) -> FilePlan:
-    """The file plan for the `runtime.json` descriptor at `destination`."""
     return FilePlan(content=descriptor.render(), destination=destination)

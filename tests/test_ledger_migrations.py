@@ -1,5 +1,3 @@
-"""Tests for the versioned SQLite migration runner (SPEC.md §16.3)."""
-
 import pytest
 
 from ledger.connection import connect
@@ -35,7 +33,7 @@ def test_migrate_is_idempotent_on_a_repeated_call(tmp_path):
     connection = connect(tmp_path / 'ledger.sqlite3')
     migrate(connection)
 
-    final_version = migrate(connection)  # no raise re-applying an already-created table
+    final_version = migrate(connection)
 
     assert final_version == SUPPORTED_SCHEMA_VERSION
     connection.close()

@@ -1,5 +1,3 @@
-"""Tests for the cost boundary hook's launcher-command allowlist."""
-
 from pathlib import Path
 
 import pytest
@@ -109,10 +107,5 @@ def test_cost_boundary_allows_any_tool_without_active_phase(
 
 
 def test_except_clause_compiles_under_the_project_python():
-    # `except OSError, RuntimeError:` looks like the invalid Python 2 form but
-    # is valid PEP 758 multi-exception syntax on this project's target (>=3.14,
-    # see pyproject.toml `requires-python`); ruff format even normalizes the
-    # parenthesized form back to this one. What must actually hold is that the
-    # module compiles cleanly under the interpreter the project targets.
     source_path = Path(__file__).resolve().parent.parent / 'hooks' / 'cost_boundary.py'
     compile(source_path.read_text(), str(source_path), 'exec')

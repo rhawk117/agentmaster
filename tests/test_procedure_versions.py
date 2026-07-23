@@ -1,8 +1,3 @@
-"""Tests for the PROCEDURE/PROCEDURE_VERSION/PROCEDURE_USE schema (SPEC.md §17.2, §20.4).
-
-`_seed_project`/`_seed_procedure` mirror tests/test_retrospective_ledger.py.
-"""
-
 import sqlite3
 
 import pytest

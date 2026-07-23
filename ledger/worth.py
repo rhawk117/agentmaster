@@ -1,20 +1,3 @@
-"""Descriptive worth reports and their EVALUATION/EVALUATION_METRIC records
-(SPEC.md §18, §23 Microtask 23).
-
-SPEC.md §18: "'Worth' is a report, not a mutable scalar" across seven named
-dimensions (Outcome, Quality, Efficiency, Reuse, Helpfulness, Harm, Evidence
-strength), and "comparisons must name their cohort and method. If no
-credible baseline exists, report descriptive metrics and uncertainty rather
-than a causal claim." `compute_run_worth`/`compute_memory_worth`/
-`compute_procedure_worth` read only the stable views §18 names over a
-`ledger.connection.connect_read_only` connection and always set `cohort` to
-the single subject they describe and `method` to `'descriptive'` -- none of
-them compares against a baseline cohort, so none of them may claim causation.
-`record_evaluation` is the separate, write-side typed command that persists
-one of those reports (or `ledger.improvement_policy`'s promotion decision) as
-an EVALUATION row with its EVALUATION_METRIC rows.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -30,8 +13,6 @@ _DESCRIPTIVE_METHOD = 'descriptive, no baseline cohort'
 
 @dataclass(frozen=True, slots=True)
 class RunWorthReport:
-    """A run's Outcome/Quality/Efficiency dimensions (SPEC.md §18)."""
-
     run_id: str
     outcome_state: str
     task_count: int
@@ -47,9 +28,6 @@ class RunWorthReport:
 def compute_run_worth(
     read_connection: sqlite3.Connection, run_id: str
 ) -> RunWorthReport | None:
-    """Compute `run_id`'s worth report from `v_run_summary`/`v_token_usage_by_model`/
-    `v_unresolved_review_findings`, or `None` if `run_id` has no RUN row.
-    """
     summary = read_connection.execute(
         'SELECT state, task_count, completed_task_count FROM v_run_summary '
         'WHERE run_id = ?',
@@ -76,8 +54,6 @@ def compute_run_worth(
     unresolved_finding_count = 0
     if attempt_ids:
         placeholders = ','.join('?' * len(attempt_ids))
-        # `placeholders` is a fixed run of `?` marks sized from `attempt_ids`,
-        # not interpolated user input; every value is still bound below.
         query = (
             'SELECT COUNT(*) FROM v_unresolved_review_findings '  # noqa: S608
             f'WHERE delivery_attempt_id IN ({placeholders})'
@@ -102,8 +78,6 @@ def compute_run_worth(
 
 @dataclass(frozen=True, slots=True)
 class MemoryWorthReport:
-    """A memory's Reuse/Helpfulness/Harm dimensions (SPEC.md §18)."""
-
     memory_id: str
     retrieval_count: int
     helpful_count: int
@@ -115,7 +89,6 @@ class MemoryWorthReport:
 def compute_memory_worth(
     read_connection: sqlite3.Connection, memory_id: str
 ) -> MemoryWorthReport:
-    """Compute `memory_id`'s worth report from `v_memory_retrieval_outcomes`."""
     retrieval_count, helpful_count, harmful_count = read_connection.execute(
         'SELECT COUNT(*), SUM(CASE WHEN helpful = 1 THEN 1 ELSE 0 END), '
         'SUM(CASE WHEN harmful = 1 THEN 1 ELSE 0 END) '
@@ -134,10 +107,6 @@ def compute_memory_worth(
 
 @dataclass(frozen=True, slots=True)
 class ProcedureWorthReport:
-    """A procedure's Reuse dimension, broken down by recorded use outcome
-    (SPEC.md §18).
-    """
-
     procedure_id: str
     use_count: int
     outcome_counts: dict[str, int]
@@ -148,7 +117,6 @@ class ProcedureWorthReport:
 def compute_procedure_worth(
     read_connection: sqlite3.Connection, procedure_id: str
 ) -> ProcedureWorthReport:
-    """Compute `procedure_id`'s worth report from `v_procedure_effectiveness`."""
     rows = read_connection.execute(
         'SELECT outcome, use_count FROM v_procedure_effectiveness WHERE procedure_id = ?',
         (procedure_id,),
@@ -167,8 +135,6 @@ def compute_procedure_worth(
 
 @dataclass(frozen=True, slots=True)
 class MetricInput:
-    """One named, unit-carrying EVALUATION_METRIC row to record."""
-
     metric_name: str
     value: float
     unit: str
@@ -177,8 +143,6 @@ class MetricInput:
 
 @dataclass(frozen=True, slots=True)
 class EvaluationInput:
-    """Everything needed to insert one EVALUATION row (SPEC.md §17.2, §18)."""
-
     id: str
     project_id: str
     decision: str
@@ -194,12 +158,6 @@ def record_evaluation(
     evaluation: EvaluationInput,
     metrics: Sequence[MetricInput],
 ) -> str:
-    """Record `evaluation` and its `metrics` as one EVALUATION + EVALUATION_METRIC set.
-
-    Returns `evaluation.id`. Each metric's `value` is stored as
-    `value_microunits` (value * 1,000,000), matching `cost_micro_usd`'s
-    existing micro-unit convention.
-    """
 
     def _insert(conn: sqlite3.Connection) -> None:
         conn.execute(

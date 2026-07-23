@@ -1,12 +1,3 @@
-"""Tests for the stable, read-only views SPEC.md §18 names for retrospective code.
-
-`v_delivery_current_head` and `v_unresolved_review_findings` forward-referenced
-DELIVERY_ATTEMPT, CI_CHECK, REVIEW, and REVIEW_FINDING (§17.1) before those
-tables existed; Microtask 21 (§23) added all four, so both views are now
-queryable and exercised with seeded data below rather than only asserted to
-exist.
-"""
-
 import sqlite3
 
 import pytest

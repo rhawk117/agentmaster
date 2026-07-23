@@ -1,20 +1,3 @@
-"""Record FEEDBACK rows for the retrospective feedback-capture flow (SPEC.md §17.2, §19).
-
-SPEC.md §19: "record-feedback writes a FEEDBACK row (§17.2): user_session_id
-and run_id are required, task_id and memory_id are optional, and rating is
-the tri-state integer described in §17.2." Referenced ids are checked before
-the insert so an unknown id raises a clear domain error instead of a raw
-`sqlite3.IntegrityError`.
-
-When `feedback.memory_id` names a memory that was actually retrieved during
-`feedback.run_id` (it has a `memory_access` row for that run), the rating also
-propagates onto that access row's helpful/harmful flags and `MEMORY`'s
-usefulness_count/harmful_count (SPEC.md §17.2: rating "map[s] harmful/neutral/
-helpful directly onto memory_access's helpful/harmful semantics"). A memory_id
-with no matching access row in that run is left untouched: the feedback isn't
-about a memory the run actually used.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -26,14 +9,11 @@ if TYPE_CHECKING:
 VALID_RATINGS: tuple[int, ...] = (-1, 0, 1)
 
 
-class UnknownReferenceError(ValueError):
-    """A FEEDBACK row named a user_session/run/task/memory id that does not exist."""
+class UnknownReferenceError(ValueError): ...
 
 
 @dataclass(frozen=True, slots=True)
 class FeedbackInput:
-    """Everything needed to insert one FEEDBACK row (SPEC.md §17.2)."""
-
     id: str
     user_session_id: str
     run_id: str
@@ -80,16 +60,6 @@ def _apply_memory_feedback(
 
 
 def record_feedback(connection: sqlite3.Connection, feedback: FeedbackInput) -> None:
-    """Validate `feedback` and insert its FEEDBACK row.
-
-    Raises
-    ------
-    ValueError
-        `feedback.rating` is not -1, 0, or 1.
-    UnknownReferenceError
-        `user_session_id`, `run_id`, `task_id`, or `memory_id` names a row
-        that does not exist.
-    """
     if feedback.rating not in VALID_RATINGS:
         raise ValueError(f'rating must be one of {VALID_RATINGS}, got {feedback.rating}')
     _require_row(

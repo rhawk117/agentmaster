@@ -1,5 +1,3 @@
-"""Tests for artifact/evidence provenance schema and recording (SPEC.md §17.1, §17.2)."""
-
 import sqlite3
 
 import pytest

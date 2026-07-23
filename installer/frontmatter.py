@@ -1,12 +1,3 @@
-"""Bounded frontmatter allow-list updater (SPEC.md §13).
-
-Not a general YAML parser: finds the first `---`-delimited block, replaces
-or inserts only allow-listed top-level scalar keys by exact line match, and
-leaves every other line — comments, nested mappings, platform-specific
-lists, and the Markdown body after the closing delimiter — untouched,
-byte-for-byte.
-"""
-
 import re
 from typing import TYPE_CHECKING
 
@@ -20,8 +11,7 @@ _TOP_LEVEL_KEY_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_-]*):(.*)$')
 _UNSAFE_VALUE_RE = re.compile(r'^\s*[&*!]')
 
 
-class FrontmatterError(ValueError):
-    """The first YAML frontmatter block is malformed or the requested edit is unsafe."""
+class FrontmatterError(ValueError): ...
 
 
 def _is_delimiter(line: str) -> bool:
@@ -38,9 +28,6 @@ def _validate_overrides(overrides: Mapping[str, str]) -> None:
 
 
 def _split_frontmatter(lines: list[str]) -> tuple[list[str], list[str]]:
-    """Return `(block, rest)`: the lines between the delimiters, and the closing
-    delimiter plus everything after it, untouched.
-    """
     if not lines or not _is_delimiter(lines[0]):
         raise FrontmatterError('missing opening --- delimiter')
     closing = next((i for i in range(1, len(lines)) if _is_delimiter(lines[i])), None)
@@ -50,14 +37,6 @@ def _split_frontmatter(lines: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _managed_key_lines(block: list[str]) -> dict[str, int]:
-    """Map each managed key already present in `block` to its line index.
-
-    Raises
-    ------
-    FrontmatterError
-        A managed key appears more than once, or its value uses YAML
-        anchor/alias/tag syntax this updater refuses to touch.
-    """
     seen: dict[str, int] = {}
     for index, line in enumerate(block):
         match = _TOP_LEVEL_KEY_RE.match(line)
@@ -73,29 +52,6 @@ def _managed_key_lines(block: list[str]) -> dict[str, int]:
 
 
 def update_frontmatter(content: str, overrides: Mapping[str, str]) -> str:
-    """Replace or insert allow-listed scalar keys in the first frontmatter block.
-
-    Parameters
-    ----------
-    content
-        Full file content; must open with a `---` delimiter line.
-    overrides
-        Allow-listed key -> new scalar value. Values must be single-line.
-
-    Returns
-    -------
-    The updated content. Every line outside the touched keys — comments,
-    nested mappings, platform-specific lists, and the Markdown body — is
-    preserved byte-for-byte.
-
-    Raises
-    ------
-    FrontmatterError
-        An override key isn't allow-listed, an override value contains a
-        newline, the file is missing an opening or closing delimiter, a
-        managed key appears more than once, or an existing managed key's
-        value uses YAML anchor/alias/tag syntax this updater refuses to touch.
-    """
     _validate_overrides(overrides)
     lines = content.splitlines(keepends=True)
     block, rest = _split_frontmatter(lines)

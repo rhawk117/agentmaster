@@ -1,14 +1,3 @@
-"""GitHub Copilot CLI install target.
-
-Composes the transactional actions core, the manifest, and the worker
-renderer into a single `install`/`uninstall` pair for the Copilot user
-scope. Ported from the retired shell installer: 4 rendered
-workers plus 4 re-pinned coordinator files under `home/agents/`, the 4
-router-skill trees under `home/skills/`, the 4 hook scripts under
-`home/agentmaster-hooks/`, and a `home/hooks/agentmaster.json` event
-config that participates in the same classify/backup/dry-run pass.
-"""
-
 import json
 import os
 from dataclasses import dataclass
@@ -30,7 +19,6 @@ if TYPE_CHECKING:
 
 
 def default_home() -> Path:
-    """Return the Copilot config dir: `$COPILOT_CONFIG_DIR` or `~/.copilot`."""
     override = os.environ.get('COPILOT_CONFIG_DIR')
     return Path(override) if override else Path.home() / '.copilot'
 
@@ -146,8 +134,6 @@ def _read_text(path: Path) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class CopilotInstallOptions:
-    """Per-call Copilot installer inputs beyond the source root and target home."""
-
     roles: CopilotRoleConfig
     agentmaster_home: Path
     ledger_path: Path | None
@@ -158,14 +144,6 @@ class CopilotInstallOptions:
 
 
 def install(root: Path, home: Path, options: CopilotInstallOptions) -> InstallReport:
-    """Install the agentmaster Copilot target into `home`.
-
-    Verifies every source file exists before planning a single write, then
-    applies all agents, skills, hooks, the hook config, the checkout-
-    independent runtime + launcher (under `agentmaster_home`), and the
-    `runtime.json` descriptor beside the installed hooks — all in one
-    transactional pass backed up under `home`.
-    """
     home = home.resolve()
     roles, manifest = options.roles, options.manifest
     agentmaster_home = options.agentmaster_home.resolve()
@@ -214,14 +192,6 @@ def uninstall(
     agentmaster_home: Path,
     manifest: Manifest = MANIFEST,
 ) -> InstallReport:
-    """Remove the agentmaster Copilot target from `home`.
-
-    Removes the 7 agent files, the 3 router-skill trees, the hook script
-    directory (including the `runtime.json` descriptor beside it), the
-    `home/hooks/agentmaster.json` config, and the installed runtime/launcher
-    under `agentmaster_home` — other files under `home/hooks/` and the
-    ledger/config/artifacts under `agentmaster_home` are left untouched.
-    """
     home = home.resolve()
     agentmaster_home = agentmaster_home.resolve()
     owned_state = managed_state.parse(_read_text(agentmaster_home / 'owned-state.json'))

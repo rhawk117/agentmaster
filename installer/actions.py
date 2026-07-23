@@ -1,14 +1,3 @@
-"""Transactional file actions for the agentmaster installer.
-
-`apply_plans` classifies every planned file before touching the filesystem
-(create / update / mode / skip), backs up files it is about to update into a
-collision-safe backup directory, writes each file atomically (temp file +
-`os.replace`) preserving the destination's existing permissions unless the
-plan requests executable, and rolls the entire batch back to its exact prior
-state if any write fails partway through. `dry_run` performs the
-classification and reporting only.
-"""
-
 import os
 import secrets
 import shutil
@@ -26,8 +15,6 @@ type Status = Literal['create', 'update', 'mode', 'skip', 'remove']
 
 @dataclass(frozen=True, slots=True)
 class FilePlan:
-    """One file the installer intends to place, with its exact content."""
-
     content: str
     destination: Path
     executable: bool = False
@@ -35,8 +22,6 @@ class FilePlan:
 
 @dataclass(slots=True)
 class InstallReport:
-    """Outcome of an install or uninstall run."""
-
     entries: list[tuple[Status, Path]] = field(default_factory=list)
     backup_dir: Path | None = None
 
@@ -52,21 +37,6 @@ class InstallReport:
 
 
 class BatchRollbackError(OSError):
-    """A batch write failed and rollback could not fully restore prior state.
-
-    Raised only when rollback itself leaves some destinations unrestored;
-    a clean rollback re-raises the original error instead, so callers only
-    ever see this type when there is genuinely extra diagnostic content —
-    both the triggering failure and the paths rollback could not fix.
-
-    Parameters
-    ----------
-    original
-        The exception that triggered rollback.
-    unrestored
-        Destinations rollback could not restore to their prior state.
-    """
-
     def __init__(self, original: Exception, unrestored: list[Path]) -> None:
         self.original = original
         self.unrestored = unrestored
@@ -80,11 +50,6 @@ def _default_suffix() -> str:
 
 
 def _unique_dir(root: Path, prefix: str, *, suffix_provider: Callable[[], str]) -> Path:
-    """Create and return a directory under `root` that did not previously exist.
-
-    Never `mkdir(exist_ok=True)`: a backup directory is exclusively owned by
-    one batch, so reusing an existing one would let two runs' backups mix.
-    """
     root.mkdir(parents=True, exist_ok=True)
     while True:
         candidate = root / f'{prefix}-{suffix_provider()}'
@@ -121,12 +86,6 @@ def _backup(destination: Path, backup_dir: Path, backup_root: Path) -> Path:
 
 
 def _write_atomic(plan: FilePlan, prior_mode: int | None) -> None:
-    """Write `plan.content` atomically, preserving `prior_mode` when given.
-
-    `prior_mode` is the destination's existing permission bits on an update;
-    `None` on a fresh create, where the temp file's own default mode applies
-    unless `plan.executable` requests the execute bits.
-    """
     fd, tmp_name = tempfile.mkstemp(dir=plan.destination.parent, suffix='.tmp')
     tmp = Path(tmp_name)
     try:
@@ -142,15 +101,12 @@ def _write_atomic(plan: FilePlan, prior_mode: int | None) -> None:
 
 
 def _apply_mode_only(plan: FilePlan, *, prior_mode: int) -> None:
-    """Flip only the execute bits; content is already identical."""
     new_mode = prior_mode | 0o111 if plan.executable else prior_mode & ~0o111
     plan.destination.chmod(new_mode)
 
 
 @dataclass(slots=True)
 class _Applied:
-    """One completed write in a batch, with enough state to invert it."""
-
     status: Status
     destination: Path
     backup: Path | None = None
@@ -158,11 +114,6 @@ class _Applied:
 
 
 def _rollback(applied: list[_Applied]) -> list[Path]:
-    """Best-effort restore of every applied write, most recent first.
-
-    Returns the destinations that could not be restored; an empty list
-    means the batch's prior state was fully recovered.
-    """
     unrestored: list[Path] = []
     for entry in reversed(applied):
         try:
@@ -185,21 +136,6 @@ def apply_plans(
     suffix_provider: Callable[[], str] = _default_suffix,
     write: Callable[[FilePlan, int | None], None] = _write_atomic,
 ) -> InstallReport:
-    """Install every plan, or report what would happen when `dry_run`.
-
-    Classification happens for all plans before any write; parent
-    directories are created for all plans before the first file is
-    written, so an uncreatable parent aborts with nothing installed. If a
-    write fails partway through the batch, every prior write from this call
-    is rolled back to its exact starting state before the exception
-    propagates; if rollback itself cannot restore everything, the original
-    failure and the unrestored paths are reported together via
-    `BatchRollbackError`.
-
-    `suffix_provider` and `write` are injectable so tests can force a
-    collision or a mid-batch failure deterministically, without permission
-    or timing tricks against the real filesystem.
-    """
     classified = [(plan, _classify(plan)) for plan in plans]
     report = InstallReport(
         entries=[(status, plan.destination) for plan, status in classified]
@@ -257,7 +193,6 @@ def _apply_one(
 
 
 def remove_paths(paths: Sequence[Path], *, dry_run: bool) -> InstallReport:
-    """Remove files and directory trees; missing paths are reported as skips."""
     report = InstallReport()
     for path in paths:
         if not path.exists():

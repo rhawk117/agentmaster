@@ -1,5 +1,3 @@
-"""Tests for `ledger.queries` (SPEC.md §17.1, §19, §23 Microtask 16, Microtask 17)."""
-
 import pytest
 from conftest import seed_project_run_task
 

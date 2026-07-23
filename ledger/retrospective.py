@@ -1,29 +1,3 @@
-"""Post-delivery retrospective loop: read-only observations to write-typed
-retrospective records and candidate memories (SPEC.md §9.1, §18, §20.4, §23
-Microtask 23).
-
-The improvement loop's first two steps are "record structured execution and
-evidence" (already done by the time a RUN reaches `RetrospectivePending`) and
-"complete an outcome-aware retrospective" (§20.4). `gather_observations` reads
-only the stable, allow-listed views SPEC.md §18 names -- never a raw table --
-over a `ledger.connection.connect_read_only` connection, so the retrospective
-capability never needs write authority to observe. `run_retrospective` then
-writes the RETROSPECTIVE/RETRO_OBSERVATION rows those observations become and,
-"after the configured delivery terminal state and before run completion"
-(§23 M23), advances the RUN from `RetrospectivePending` to `Complete` --
-which is what fires the `RUN_COMPLETION_HOOKS` a later microtask attaches its
-feedback-capture callback to (SPEC.md §9.1: "the run's retrospective must
-exist before feedback is solicited").
-
-`propose_memory_candidate` is the loop's third step, "propose candidate
-memories" (§20.4): it creates a Candidate MEMORY row scoped only to the
-retrospective's originating project, never global (§18: "Retrospectives
-create candidates, never active/global knowledge directly") and links it to
-the observation and evidence it came from. Validation, activation, and
-cross-project promotion are `ledger.memory_service`/`ledger.improvement_policy`
-concerns, not this module's.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -35,24 +9,17 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class RunNotReadyForRetrospectiveError(ValueError):
-    """RUN `run_id` has not reached `RetrospectivePending`, so no retrospective
-    may start yet.
-    """
+class RunNotReadyForRetrospectiveError(ValueError): ...
 
 
 @dataclass(frozen=True, slots=True)
 class RetrospectiveClock:
-    """The clock and id minting one `run_retrospective` call needs."""
-
     now: str
     id_factory: Callable[[], str]
 
 
 @dataclass(frozen=True, slots=True)
 class ObservationDraft:
-    """One RETRO_OBSERVATION row `run_retrospective` is about to write."""
-
     observation_kind: str
     claim: str
     confidence: str | None = None
@@ -61,8 +28,6 @@ class ObservationDraft:
 
 @dataclass(frozen=True, slots=True)
 class RetrospectiveResult:
-    """The outcome of one `run_retrospective` call."""
-
     retrospective_id: str
     observation_ids: tuple[str, ...]
     outcome: str | None
@@ -127,8 +92,6 @@ def _quality_observations(
     if not attempt_ids:
         return []
     placeholders = ','.join('?' * len(attempt_ids))
-    # `placeholders` is a fixed run of `?` marks sized from `attempt_ids`, not
-    # interpolated user input; every value is still bound below.
     query = (
         'SELECT severity, summary FROM v_unresolved_review_findings '  # noqa: S608
         f'WHERE delivery_attempt_id IN ({placeholders})'
@@ -171,13 +134,6 @@ def _feedback_observations(
 def gather_observations(
     read_connection: sqlite3.Connection, run_id: str
 ) -> list[ObservationDraft]:
-    """Build descriptive observations for `run_id` from allow-listed views only.
-
-    Reads `v_run_summary` (outcome), `v_token_usage_by_role` (efficiency),
-    `v_delivery_current_head`/`v_unresolved_review_findings` (quality), and
-    `v_run_feedback` (feedback) -- never a raw table -- matching SPEC.md §18:
-    "connects read-only to allow-listed views."
-    """
     return [
         *_outcome_observations(read_connection, run_id),
         *_efficiency_observations(read_connection, run_id),
@@ -211,17 +167,6 @@ def run_retrospective(
     run_id: str,
     clock: RetrospectiveClock,
 ) -> RetrospectiveResult:
-    """Complete `run_id`'s retrospective and advance it to `Complete`.
-
-    Idempotent: a run whose retrospective is already `Complete` returns the
-    existing result without recreating observations or re-transitioning the
-    run, so interruption recovery can retry this call safely.
-
-    Raises
-    ------
-    RunNotReadyForRetrospectiveError
-        `run_id`'s RUN row is not currently `RetrospectivePending`.
-    """
     existing = _existing_retrospective(write_connection, run_id)
     if existing is not None and existing[1] == 'Complete':
         return RetrospectiveResult(
@@ -292,8 +237,6 @@ def run_retrospective(
 
 @dataclass(frozen=True, slots=True)
 class MemoryCandidateProposal:
-    """Everything needed to create one Candidate MEMORY row from a retrospective."""
-
     memory_id: str
     project_id: str
     memory_kind: str
@@ -311,15 +254,6 @@ def propose_memory_candidate(
     *,
     created_at: str,
 ) -> str:
-    """Create one Candidate MEMORY row, scoped to `proposal.project_id` only.
-
-    Links the new memory to `proposal.observation_id`/`proposal.evidence_id`
-    via a `'proposes'` MEMORY_EVIDENCE row (SPEC.md §18: "All conclusions link
-    to evidence"). Never creates a global scope: SPEC.md §18: "Retrospectives
-    create candidates, never active/global knowledge directly" -- global
-    promotion is `ledger.improvement_policy`'s job, gated on independent,
-    cross-project evidence.
-    """
 
     def _insert(conn: sqlite3.Connection) -> None:
         conn.execute(

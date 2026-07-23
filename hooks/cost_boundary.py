@@ -1,11 +1,3 @@
-"""PreToolUse (skill cost boundary) -> block direct repo work while a phase runs.
-
-Active only while `.agentmaster/.phase` names a phase: the coordinator skills
-write the marker at phase start and clear it at phase end, so the boundary
-cannot outlive its phase. Paths outside the workspace (the plan-mode plan
-file, the session scratchpad) and under `.agentmaster/` stay writable.
-"""
-
 import sys
 from pathlib import Path
 
@@ -28,7 +20,6 @@ def _target_path(args: object) -> str:
 
 
 def _is_exempt(target: str, root: Path) -> bool:
-    """True when target lies outside the workspace or under .agentmaster/."""
     try:
         resolved = (root / target).resolve()
     except OSError, RuntimeError:
@@ -39,12 +30,6 @@ def _is_exempt(target: str, root: Path) -> bool:
 
 
 def _is_control_launcher_command(command: str) -> bool:
-    """True only for a bare `agentmaster <control-noun> ...` with no shell chaining.
-
-    Deny-by-default: any chaining/redirection metacharacter, or a first token
-    that isn't the launcher, or a second token outside the approved control
-    nouns, falls through to the caller's block.
-    """
     if any(marker in command for marker in _SHELL_METACHARACTERS):
         return False
     tokens = command.strip().split()
@@ -73,8 +58,6 @@ def main() -> int:
             if target and _is_exempt(target, root):
                 return 0
     except Exception as exc:  # noqa: BLE001
-        # Fail closed: an unexpected error while a phase is active must block
-        # the tool call, not fall through to exit 1 (which lets it proceed).
         sys.stderr.write(f'agentmaster cost boundary: fail-closed after error: {exc}\n')
     sys.stderr.write(
         f'agentmaster cost boundary ({phase} phase): this phase never touches '

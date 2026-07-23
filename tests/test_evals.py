@@ -1,11 +1,3 @@
-"""Schema guard for evals/evals.json — the first CI consumer of evals/.
-
-evals.json is a wrapper object (`{"skill_name": ..., "evals": [...]}`), not a
-bare array. This validates required fields and types per case and that every
-`files` entry resolves — every case in the file today references only input
-fixtures that exist on disk, so an unresolved path is a real defect.
-"""
-
 import json
 from typing import TYPE_CHECKING
 

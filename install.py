@@ -1,39 +1,3 @@
-"""agentmaster installer CLI.
-
-Commands:
-    python install.py install   --target claude|copilot|all [--dry-run] [--no-input]
-                                 [--claude-model NAME] [--copilot-model NAME]
-                                 [--claude-orchestrator-model NAME]
-                                 [--claude-orchestrator-effort low|medium|high|xhigh|max]
-                                 [--claude-implementer-model NAME]
-                                 [--claude-implementer-effort low|medium|high|xhigh|max]
-                                 [--claude-review-model NAME]
-                                 [--claude-review-effort low|medium|high|xhigh|max]
-                                 [--copilot-implementer-model NAME]
-                                 [--ledger-path PATH] [--no-ledger] [--artifact-dir PATH]
-                                 [--delivery-mode local|commit|pull-request|merge]
-                                 [--auto-compact-percent 1-100]
-                                 [--clear-auto-compact-override]
-                                 [--config PATH] [--agentmaster-home PATH]
-    python install.py uninstall --target claude|copilot|all [--dry-run]
-    python install.py validate
-    python install.py sync
-
-Each role (coordinator, orchestrator, implementer, reviewer) resolves
-independently: an explicit flag wins; when absent on an interactive terminal
-the installer prompts; otherwise it uses the recommended default silently.
-`--no-input` and a non-interactive stdin both suppress prompting. Copilot has
-no orchestrator/reviewer roles and never gets an effort field.
-Destinations honor `CLAUDE_CONFIG_DIR` / `COPILOT_CONFIG_DIR` and the
-`--claude-dir` / `--copilot-dir` overrides. `--config` loads a versioned
-TOML file (schema in SPEC.md §12); explicit CLI flags always win over it.
-`--auto-compact-percent` (Claude only, 1-100) and
-`--clear-auto-compact-override` (mutually exclusive) manage
-`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`; this affects the main Claude conversation
-and all subagents, so omitting both flags leaves current behavior untouched.
-Exit code is 0 on success, 1 on any failure or validation finding.
-"""
-
 import argparse
 import sys
 from pathlib import Path
@@ -75,6 +39,40 @@ if TYPE_CHECKING:
     from installer.actions import InstallReport
 
 ROOT = Path(__file__).resolve().parent
+_CLI_DESCRIPTION = """agentmaster installer CLI.
+
+Commands:
+    python install.py install   --target claude|copilot|all [--dry-run] [--no-input]
+                                 [--claude-model NAME] [--copilot-model NAME]
+                                 [--claude-orchestrator-model NAME]
+                                 [--claude-orchestrator-effort low|medium|high|xhigh|max]
+                                 [--claude-implementer-model NAME]
+                                 [--claude-implementer-effort low|medium|high|xhigh|max]
+                                 [--claude-review-model NAME]
+                                 [--claude-review-effort low|medium|high|xhigh|max]
+                                 [--copilot-implementer-model NAME]
+                                 [--ledger-path PATH] [--no-ledger] [--artifact-dir PATH]
+                                 [--delivery-mode local|commit|pull-request|merge]
+                                 [--auto-compact-percent 1-100]
+                                 [--clear-auto-compact-override]
+                                 [--config PATH] [--agentmaster-home PATH]
+    python install.py uninstall --target claude|copilot|all [--dry-run]
+    python install.py validate
+    python install.py sync
+
+Each role (coordinator, orchestrator, implementer, reviewer) resolves
+independently: an explicit flag wins; when absent on an interactive terminal
+the installer prompts; otherwise it uses the recommended default silently.
+`--no-input` and a non-interactive stdin both suppress prompting. Copilot has
+no orchestrator/reviewer roles and never gets an effort field.
+Destinations honor `CLAUDE_CONFIG_DIR` / `COPILOT_CONFIG_DIR` and the
+`--claude-dir` / `--copilot-dir` overrides. `--config` loads a versioned
+TOML file (schema in SPEC.md §12); explicit CLI flags always win over it.
+`--auto-compact-percent` (Claude only, 1-100) and
+`--clear-auto-compact-override` (mutually exclusive) manage
+`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`; this affects the main Claude conversation
+and all subagents, so omitting both flags leaves current behavior untouched.
+Exit code is 0 on success, 1 on any failure or validation finding."""
 _MODEL_FIELDS = (
     'claude_model',
     'copilot_model',
@@ -268,7 +266,6 @@ def _resolve_copilot_roles(
 
 
 def _bootstrap_ledger(resolved: ResolvedConfig) -> int | None:
-    """Run the ledger/artifact bootstrap; returns an exit code only on failure."""
     if not resolved.ledger_enabled:
         return None
     try:
@@ -433,7 +430,7 @@ def _add_auto_compact_arguments(cmd: argparse.ArgumentParser) -> None:
 
 
 def _build_parser() -> tuple[argparse.ArgumentParser, dict[str, Callable]]:
-    parser = argparse.ArgumentParser(prog='install.py', description=__doc__)
+    parser = argparse.ArgumentParser(prog='install.py', description=_CLI_DESCRIPTION)
     sub = parser.add_subparsers(dest='command', required=True)
     commands = {
         'install': _cmd_install,

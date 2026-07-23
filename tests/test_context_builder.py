@@ -1,5 +1,3 @@
-"""Tests for the bounded, session-scoped context-pack builder (SPEC.md §9.3, §23 MT16)."""
-
 import subprocess
 import sys
 

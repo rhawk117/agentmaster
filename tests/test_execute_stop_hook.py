@@ -1,12 +1,3 @@
-"""Tests for the execute Stop hook (SPEC.md §20.3, §23 Microtask 21).
-
-Runs the INSTALLED `execute_stop.py` (real `install.py` into a disposable
-Claude home) so `runtime.json` sits beside it, exactly as a real session
-would see it -- the hook resolves the ledger from that installed runtime
-descriptor (`hooklib.load_runtime_descriptor`), never from a workspace
-`<workspace>/.agentmaster/config.toml` (that path no longer exists).
-"""
-
 import pytest
 
 from ledger.connection import connect
@@ -17,7 +8,6 @@ pytestmark = pytest.mark.subprocess
 
 
 def _install_claude(run_cli, repo_root, tmp_path, *, no_ledger: bool = False):
-    """Install the Claude target into a disposable home."""
     claude_home = tmp_path / 'claude-home'
     agentmaster_home = tmp_path / 'agentmaster-home'
     args = [
@@ -73,8 +63,6 @@ def test_allows_when_ledger_is_missing(tmp_path, run_cli, repo_root, installed_h
     claude_home, agentmaster_home = _install_claude(run_cli, repo_root, tmp_path)
     hook_path = claude_home / 'agentmaster' / 'hooks' / 'execute_stop.py'
     ledger_path = agentmaster_home / 'ledger.sqlite3'
-    # The descriptor still names this path, but the file itself is gone --
-    # a corrupted/partially-uninstalled home, not merely a disabled ledger.
     ledger_path.unlink(missing_ok=True)
 
     workspace = tmp_path / 'workspace'
@@ -88,10 +76,6 @@ def test_allows_when_ledger_is_missing(tmp_path, run_cli, repo_root, installed_h
 
 @pytest.mark.integration
 def test_allows_when_ledger_is_disabled(tmp_path, run_cli, repo_root, installed_hook):
-    """Replaces the old workspace-`config.toml`-absent case: with the
-    workspace config path dropped entirely, a disabled ledger
-    (`--no-ledger`) is the fail-open path this now exercises.
-    """
     claude_home, _agentmaster_home = _install_claude(
         run_cli, repo_root, tmp_path, no_ledger=True
     )
@@ -161,7 +145,6 @@ def test_allows_when_run_id_has_no_matching_run(
 ):
     claude_home, _agentmaster_home = _install_claude(run_cli, repo_root, tmp_path)
     hook_path = claude_home / 'agentmaster' / 'hooks' / 'execute_stop.py'
-    # `install` already bootstraps a migrated, unseeded ledger at this path.
 
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
@@ -231,10 +214,6 @@ def test_malformed_json_exits_zero(run_hook):
 
 
 def _load_execute_stop(hooks_dir):
-    """Load `execute_stop.py` in-process (not via subprocess) so its module
-    attributes are directly inspectable, matching `tests/test_hooklib.py`'s
-    `importlib.util`-based loading convention.
-    """
     import importlib.util
     import sys
 
@@ -253,12 +232,6 @@ def _load_execute_stop(hooks_dir):
 
 
 def test_blocking_states_match_the_orchestrator_source_of_truth(repo_root):
-    """Drift guard (SPEC.md §20.3): the standalone hook can't import
-    `ledger.orchestrator_state` (it runs copied without the `ledger`
-    package), so its hand-duplicated `BLOCKING_STATES` set must be asserted
-    identical to `BLOCKING_COMPLETION_STATES`, the orchestrator-side source
-    of truth, rather than silently drifting apart.
-    """
     from ledger.orchestrator_state import BLOCKING_COMPLETION_STATES
 
     execute_stop = _load_execute_stop(repo_root / 'hooks')

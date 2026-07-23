@@ -1,5 +1,3 @@
-"""Tests for `installer.skill_routing` — deterministic writing-skills routing."""
-
 from installer.capabilities import (
     CAPABILITIES,
     check_tool_authority,

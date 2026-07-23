@@ -1,5 +1,3 @@
-"""PreCompact -> snapshot .agentmaster/ so ledgers of record survive with history."""
-
 import shutil
 import tempfile
 import time
@@ -9,12 +7,6 @@ import hooklib
 
 
 def _new_snapshot_dir(am: Path) -> Path:
-    """Create and return a unique snapshot directory; never collides with a sibling.
-
-    A timestamp prefix keeps directories sortable; `mkdtemp` guarantees the
-    directory itself is created atomically, so same-second or same-process
-    calls never merge or overwrite one another.
-    """
     root = am / 'compaction-snapshots'
     root.mkdir(parents=True, exist_ok=True)
     ts = time.strftime('%Y%m%d-%H%M%S')

@@ -1,5 +1,3 @@
-"""SubagentStop -> append a telemetry row for the finished subagent."""
-
 import contextlib
 import json
 import time
@@ -9,7 +7,6 @@ import hooklib
 
 
 def _transcript_stats(transcript_path: str, aid: str) -> tuple[str | int, str]:
-    """Sum input/output tokens and find the model from the subagent transcript."""
     if not (aid and transcript_path):
         return '', ''
     base = Path(transcript_path)
@@ -36,12 +33,6 @@ def _transcript_stats(transcript_path: str, aid: str) -> tuple[str | int, str]:
 
 
 def _consume_start(sdir: Path, legacy_dir: Path, aid: str) -> str:
-    """Return the elapsed duration in ms and delete the recorded start.
-
-    Checks the session-scoped .starts/ first, falling back to the legacy
-    root .agentmaster/.starts/ for timestamps recorded before session
-    scoping.
-    """
     for base in (sdir, legacy_dir):
         st = base / '.starts' / aid
         try:
@@ -55,12 +46,6 @@ def _consume_start(sdir: Path, legacy_dir: Path, aid: str) -> str:
 
 
 def _to_int(value: str | int) -> int | None:
-    """Return `value` as a non-negative int, or `None` when absent/unparseable.
-
-    Never fabricates a token/duration value (SPEC.md §16.3): an empty
-    string or a value that isn't a real non-negative integer becomes NULL
-    rather than 0 or a guess.
-    """
     try:
         parsed = int(value)
     except TypeError, ValueError:

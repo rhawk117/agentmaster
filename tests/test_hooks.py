@@ -1,5 +1,3 @@
-"""Tests for the agentmaster lifecycle hook scripts."""
-
 import json
 import time
 
@@ -9,7 +7,6 @@ pytestmark = pytest.mark.subprocess
 
 
 def test_telemetry_writes_line_and_consumes_start(tmp_path, run_hook):
-    # Legacy .starts location predates session scoping; consume falls back to it.
     starts = tmp_path / '.agentmaster' / '.starts'
     starts.mkdir(parents=True)
     (starts / 'abc').write_text(str(time.time() - 1))
@@ -56,7 +53,6 @@ def test_telemetry_row_carries_phase_and_model(tmp_path, run_hook):
 
 
 def test_telemetry_finds_transcript_in_session_dir(tmp_path, run_hook):
-    # Live CLI layout: <dir>/<session>.jsonl with <dir>/<session>/subagents/.
     am = tmp_path / '.agentmaster'
     (am / '.starts').mkdir(parents=True)
     (am / '.starts' / 'abc').write_text(str(time.time() - 1))
@@ -374,7 +370,6 @@ def test_copilot_post_empty_queue(tmp_path, run_hook):
 
 
 def test_two_sessions_do_not_clobber_phase_or_telemetry(tmp_path, run_hook):
-    """Two sessions in one checkout must not share .phase or telemetry.md."""
     am = tmp_path / '.agentmaster'
     for session, phase in (('session-a', 'plan'), ('session-b', 'execute')):
         sdir = am / 'sessions' / session

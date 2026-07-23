@@ -1,5 +1,3 @@
-"""Tests for the ledger init/migrate/backup/doctor commands (SPEC.md §19)."""
-
 import json
 import sqlite3
 import stat
@@ -32,7 +30,7 @@ def test_cmd_init_is_idempotent(tmp_path):
     ledger_path = tmp_path / 'ledger.sqlite3'
 
     assert cmd_init(ledger_path) == 0
-    assert cmd_init(ledger_path) == 0  # repeated initialize, no raise
+    assert cmd_init(ledger_path) == 0
 
     connection = sqlite3.connect(ledger_path)
     assert current_version(connection) == SUPPORTED_SCHEMA_VERSION

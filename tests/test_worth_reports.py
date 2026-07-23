@@ -1,12 +1,3 @@
-"""Tests for EVALUATION/EVALUATION_METRIC's worth-report schema (SPEC.md §17.2, §18).
-
-§18: "'Worth' is a report, not a mutable scalar" and "Comparisons must name
-their cohort and method"; EVALUATION_METRIC's `method` column is how a stored
-metric names the method that produced it, and `CHECK (memory_id IS NOT NULL
-OR procedure_version_id IS NOT NULL)` on EVALUATION keeps every evaluation
-anchored to the memory or procedure version it judges.
-"""
-
 import sqlite3
 
 import pytest
@@ -188,9 +179,6 @@ def test_evaluation_rejects_an_evaluator_session_id_from_a_user_session(tmp_path
             (_CREATED_AT,),
         )
     connection.close()
-
-
-# --- worth compute functions (SPEC.md §18 dimensions) ------------------------
 
 
 def _seed_run_with_tasks(

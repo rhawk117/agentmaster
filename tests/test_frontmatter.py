@@ -1,5 +1,3 @@
-"""Tests for the bounded frontmatter allow-list updater (SPEC.md §13)."""
-
 import pytest
 
 from installer.frontmatter import ALLOWED_KEYS, FrontmatterError, update_frontmatter
@@ -108,14 +106,11 @@ def test_never_edits_outside_the_frontmatter_block():
 
     updated = update_frontmatter(doc, {'model': 'opus'})
 
-    # The managed key is inserted inside the block; the body's own
-    # "model:"-looking line is untouched.
     assert 'model: this is body text, not frontmatter\n' in updated
     assert updated.count('model:') == 2
 
 
 def test_no_global_regex_can_rewrite_body_content():
-    """A body line that looks like a managed key must never be touched."""
     doc = '---\nname: co\nmodel: old\n---\nExample: `model: whatever` in prose.\n'
 
     updated = update_frontmatter(doc, {'model': 'new'})

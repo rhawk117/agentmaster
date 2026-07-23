@@ -1,17 +1,3 @@
-"""Summarize agentmaster telemetry.
-
-Reads a telemetry.md file (the path given as the first argument, defaulting
-to the legacy root `.agentmaster/telemetry.md`; session-scoped runs write to
-`.agentmaster/sessions/<harness-session-id>/telemetry.md` instead, so pass
-that path explicitly for a given session), whose lines look like
-`<phase>,<agent>,<model>,<tokens>,<duration_ms>` with blank fields allowed
-(`hook` in the phase column when no phase was active), and prints invocation
-counts, token totals, and wall-clock totals per agent, per phase, and per
-model. Exits 1 when the telemetry file does not exist. With `--prune`, trims
-old telemetry lines, compaction snapshots, and stale session-start and phase
-markers in that same directory.
-"""
-
 import argparse
 import shutil
 import sys
@@ -115,7 +101,6 @@ def _prune_starts(am_dir: Path, *, dry_run: bool) -> list[str]:
 def prune(
     am_dir: Path, *, keep_lines: int, keep_snapshots: int, dry_run: bool
 ) -> list[str]:
-    """Prune telemetry artifacts under `am_dir`; return the actions taken."""
     return [
         *_prune_telemetry(am_dir, keep_lines, dry_run=dry_run),
         *_prune_snapshots(am_dir, keep_snapshots, dry_run=dry_run),

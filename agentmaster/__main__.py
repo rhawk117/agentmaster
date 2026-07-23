@@ -1,5 +1,3 @@
-"""Entry point for `python -m agentmaster` (SPEC.md §19)."""
-
 import sys
 
 from agentmaster.cli import main

@@ -1,5 +1,3 @@
-"""Tests for interruption recovery (SPEC.md §9, §23 M19)."""
-
 import uuid
 
 import pytest
@@ -245,11 +243,6 @@ def test_recover_run_flags_retrospective_pending_as_resumable(ledger_connection)
 def test_recover_run_releases_a_stale_lease_between_dispatch_and_verification(
     ledger_connection,
 ):
-    """A coordinator killed after acquiring a task lease but before the RUN
-    reaches 'Verifying' leaves that task 'running' with a lease; recovery
-    must release it so a fresh dispatch can pick the task back up, never
-    re-dispatching it while the stale lease is still held.
-    """
     seed = seed_project_run_task(ledger_connection)
     _seed_agent_session(ledger_connection, seed.run_id, 'agent-session-1')
     _advance_run(ledger_connection, seed.run_id, 'Preflight', 'Executing')
@@ -277,10 +270,6 @@ def test_recover_run_releases_a_stale_lease_between_dispatch_and_verification(
 def test_resume_after_recovery_dispatches_the_released_task_exactly_once(
     ledger_connection,
 ):
-    """After recovery releases a stale lease, resuming dispatch (blocked ->
-    ready -> running with a new lease) must not create a second TASK row or
-    a duplicate 'running' lease -- exactly one task, one live lease.
-    """
     seed = seed_project_run_task(ledger_connection)
     _seed_agent_session(ledger_connection, seed.run_id, 'agent-session-1')
     _seed_agent_session(ledger_connection, seed.run_id, 'agent-session-2')

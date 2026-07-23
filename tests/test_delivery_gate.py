@@ -1,7 +1,3 @@
-"""Tests for delivery attempt/CI recording and gates (SPEC.md §17.1, §19, §20.2,
-§20.3, §23 Microtask 22).
-"""
-
 import sqlite3
 import uuid
 
@@ -123,7 +119,7 @@ def test_record_delivery_attempt_assigns_sequential_attempt_numbers(
 
     assert attempt_no == 2
     assert next_attempt_no(ledger_connection, run) == 3
-    assert first_id  # first attempt_no was 1, implicitly checked via row
+    assert first_id
 
 
 @pytest.mark.sqlite
@@ -261,9 +257,6 @@ def test_evaluate_ci_rejects_a_skipped_required_check(ledger_connection, run):
 
 @pytest.mark.sqlite
 def test_evaluate_ci_rejects_a_neutral_check(ledger_connection, run):
-    """SPEC.md:1477 requires all required checks 'successful' -- 'neutral' is
-    not green.
-    """
     delivery_attempt_id = _seed_delivery_attempt(ledger_connection, run_id=run)
     record_ci_check(
         ledger_connection,
@@ -336,7 +329,6 @@ def test_a_head_advance_during_polling_makes_the_prior_green_check_stale(
     green_at_old_head = evaluate_ci(ledger_connection, delivery_attempt_id, ('build',))
     assert green_at_old_head.outcome == 'green'
 
-    # Someone pushed a new commit mid-poll.
     update_delivery_attempt_head(ledger_connection, delivery_attempt_id, _HEAD_B)
 
     evaluation = evaluate_ci(ledger_connection, delivery_attempt_id, ('build',))
@@ -459,7 +451,6 @@ def test_merge_gate_demands_re_review_when_the_reviewed_sha_is_stale(
             observed_at=_NOW,
         ),
     )
-    # Reviewed an older head -- a new commit landed after the review started.
     _seed_review(
         ledger_connection,
         delivery_attempt_id=delivery_attempt_id,
@@ -525,9 +516,6 @@ def test_merge_gate_blocks_when_ci_has_not_passed_even_with_a_good_review(
 
 @pytest.mark.sqlite
 def test_merge_gate_blocks_when_ci_concludes_neutral(ledger_connection, run):
-    """SPEC.md:1477 requires all required checks 'successful' -- a 'neutral'
-    conclusion must not permit a merge.
-    """
     delivery_attempt_id = _seed_delivery_attempt(ledger_connection, run_id=run)
     reviewer_session_id = _seed_reviewer_session(ledger_connection, run_id=run)
     record_ci_check(

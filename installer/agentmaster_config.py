@@ -1,13 +1,3 @@
-"""Parse, validate, and render the Agentmaster TOML config (SPEC.md §12).
-
-Not a general TOML writer: the managed tables below are rendered fresh from
-resolved installer state on every install; any table `config.toml` already
-has that this installer version doesn't manage is preserved verbatim, as
-raw text, appended after the managed block — so a future or hand-edited
-table survives a re-install untouched ("unknown keys must survive a
-read/modify/write", §12).
-"""
-
 import tomllib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -27,16 +17,6 @@ _MANAGED_TABLES = (
 
 
 class AgentmasterConfigError(ValueError):
-    """The Agentmaster config document is malformed.
-
-    Parameters
-    ----------
-    key_path
-        Dotted TOML location (e.g. ``orchestration.delivery_mode``).
-    message
-        Human-readable reason.
-    """
-
     def __init__(self, key_path: str, message: str) -> None:
         self.key_path = key_path
         super().__init__(f'{key_path}: {message}')
@@ -44,8 +24,6 @@ class AgentmasterConfigError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class AgentmasterConfigPlan:
-    """Resolved Claude-target values this installer version manages in `config.toml`."""
-
     ledger_path: str
     artifact_path: str
     ledger_enabled: bool
@@ -61,14 +39,6 @@ class AgentmasterConfigPlan:
 
 
 def validate_document(document: Mapping[str, object]) -> None:
-    """Fail-closed structural validation of an already-parsed config document.
-
-    Raises
-    ------
-    AgentmasterConfigError
-        `schema_version` is missing or unsupported, or a managed table
-        exists but isn't itself a table.
-    """
     version = document.get('schema_version')
     if version != SCHEMA_VERSION:
         raise AgentmasterConfigError(
@@ -84,12 +54,6 @@ _MISSING = object()
 
 
 def _get_dotted(document: Mapping[str, object], dotted: str) -> object:
-    """Return the value at `dotted`, or the `_MISSING` sentinel if absent.
-
-    A non-table value found before the whole path is consumed is returned
-    as-is (not `_MISSING`), so a mistyped intermediate table is reported at
-    the managed table's own dotted path rather than silently ignored.
-    """
     node: object = document
     for part in dotted.split('.'):
         if not isinstance(node, dict):
@@ -101,7 +65,6 @@ def _get_dotted(document: Mapping[str, object], dotted: str) -> object:
 
 
 def render_managed_block(plan: AgentmasterConfigPlan) -> str:
-    """Render the managed tables as fresh, deterministic TOML text."""
     return (
         f'schema_version = {SCHEMA_VERSION}\n\n'
         '[paths]\n'
@@ -126,13 +89,6 @@ def render_managed_block(plan: AgentmasterConfigPlan) -> str:
 
 
 def render_config(plan: AgentmasterConfigPlan, existing_text: str | None) -> str:
-    """Render the full `config.toml`: fresh managed block + preserved unmanaged tables.
-
-    Raises
-    ------
-    AgentmasterConfigError
-        `existing_text` is present but invalid (see `validate_document`).
-    """
     managed = render_managed_block(plan)
     if not existing_text or not existing_text.strip():
         return managed
@@ -152,7 +108,6 @@ def render_config(plan: AgentmasterConfigPlan, existing_text: str | None) -> str
 
 
 def _extract_unmanaged_blocks(text: str, names: set[str]) -> str:
-    """Return the raw text of each top-level `[name]`/`[name.*]` block, verbatim."""
     blocks: list[str] = []
     capture = False
     for line in text.splitlines(keepends=True):

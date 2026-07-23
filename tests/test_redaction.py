@@ -1,5 +1,3 @@
-"""Tests for fail-closed redact-before-persist (SPEC.md §16.2)."""
-
 import re
 from pathlib import Path
 

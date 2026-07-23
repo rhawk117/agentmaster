@@ -1,5 +1,3 @@
-"""Tests for the FTS5 memory index and access logging (SPEC.md §23 MT14 c2, §17.5)."""
-
 import pytest
 
 from ledger.connection import connect

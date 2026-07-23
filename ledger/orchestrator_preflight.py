@@ -1,15 +1,3 @@
-"""Orchestrator preflight, gating RUN Preflight->Executing/Blocked (SPEC.md §9, §23 M19).
-
-SPEC.md §23 Microtask 19: "Add preflight for repository, worktree, base SHA,
-configuration, tools, dependencies, ledger health, delivery authority, and
-budgets." Each category's actual check (a git call, a config load, a tool
-probe, a budget lookup) lives with whichever caller has that information;
-this module only enforces that every category was checked and turns the
-result into a legality-checked RUN transition, so a caller cannot silently
-drop a category and pass by omission (SPEC.md §9: "must not ... hide budget
-exhaustion").
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -19,7 +7,6 @@ if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Callable, Sequence
 
-# SPEC.md §23 Microtask 19's exact preflight category list.
 PREFLIGHT_CATEGORIES: tuple[str, ...] = (
     'repository',
     'worktree',
@@ -35,8 +22,6 @@ PREFLIGHT_CATEGORIES: tuple[str, ...] = (
 
 @dataclass(frozen=True, slots=True)
 class PreflightCheck:
-    """One preflight category's pass/fail result and, on failure, why."""
-
     name: str
     passed: bool
     detail: str = ''
@@ -44,8 +29,6 @@ class PreflightCheck:
 
 @dataclass(frozen=True, slots=True)
 class PreflightResult:
-    """The outcome of one `run_preflight` call."""
-
     passed: bool
     checks: tuple[PreflightCheck, ...]
     blocked_reason: str | None
@@ -59,23 +42,6 @@ def run_preflight(
     now: str,
     id_factory: Callable[[], str],
 ) -> PreflightResult:
-    """Validate `checks` cover every preflight category, then transition `run_id`.
-
-    Every check passing transitions the RUN to `'Executing'`. Any failing
-    check transitions it to `'Blocked'` with a reason naming each failing
-    category and its detail (SPEC.md §9.1: "Preflight --> Blocked: missing
-    authority or dependency").
-
-    Raises
-    ------
-    ValueError
-        `checks` does not cover exactly `PREFLIGHT_CATEGORIES` (a caller
-        bug: a preflight run must check every category, not skip one).
-    RunNotFoundError
-        No RUN row exists for `run_id`.
-    IllegalTransitionError
-        `run_id` is not currently in the `'Preflight'` state.
-    """
     seen = {check.name for check in checks}
     missing = [name for name in PREFLIGHT_CATEGORIES if name not in seen]
     if missing:

@@ -1,5 +1,3 @@
-"""Tests for the Agentmaster config.toml parse/validate/render logic."""
-
 import pytest
 
 from installer.agentmaster_config import (
@@ -96,7 +94,7 @@ def test_validate_document_accepts_well_formed_document():
         'orchestration': {'delivery_mode': 'local'},
     }
 
-    validate_document(document)  # no raise
+    validate_document(document)
 
 
 def test_validate_document_rejects_missing_schema_version():

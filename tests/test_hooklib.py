@@ -1,5 +1,3 @@
-"""Tests for the shared hook library."""
-
 import importlib.util
 import io
 import json
@@ -213,6 +211,6 @@ def test_spool_event_fails_open_on_unwritable_events_dir(tmp_path):
     events = am / 'events'
     events.write_text('not a directory')
 
-    hooklib.spool_event(payload, {'kind': 'agent_session'})  # must not raise
+    hooklib.spool_event(payload, {'kind': 'agent_session'})
 
     assert events.is_file()

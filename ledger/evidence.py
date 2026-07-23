@@ -1,11 +1,3 @@
-"""Record command/tool captures as ARTIFACT + EVIDENCE rows (SPEC.md §16.2, §23 MT13).
-
-Raw output is persisted in full only for a failing command (the "failures
-only" default); a successful capture keeps just a redacted, truncated
-preview on disk. Redaction always runs before the content-addressed digest
-is computed, so a secret is never hashed merely to claim it is safe to store.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -22,8 +14,6 @@ DEFAULT_PREVIEW_BYTES = 4096
 
 @dataclass(frozen=True, slots=True)
 class CommandCapture:
-    """Everything needed to persist one command/tool invocation as evidence."""
-
     evidence_id: str
     artifact_id: str
     project_id: str
@@ -43,8 +33,6 @@ class CommandCapture:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceRecord:
-    """The persisted result of `record_command_evidence`."""
-
     evidence_id: str
     artifact_id: str
     sha256: str
@@ -59,7 +47,6 @@ def record_command_evidence(
     policy: RedactionPolicy | None = None,
     preview_bytes: int = DEFAULT_PREVIEW_BYTES,
 ) -> EvidenceRecord:
-    """Redact `capture.raw_output`, store it, and record the ARTIFACT + EVIDENCE rows."""
     redacted = redact(capture.raw_output, policy)
     stored_full = capture.exit_code != 0
     stored_bytes = redacted if stored_full else redacted[:preview_bytes]

@@ -1,5 +1,3 @@
-"""Copilot postToolUse -> pop the start timestamp and append a telemetry line."""
-
 import contextlib
 import time
 
@@ -7,12 +5,6 @@ import hooklib
 
 
 def _to_int(value: str | int) -> int | None:
-    """Return `value` as a non-negative int, or `None` when absent/unparseable.
-
-    Never fabricates a token/duration value (SPEC.md §16.3): an empty
-    string or a value that isn't a real non-negative integer becomes NULL
-    rather than 0 or a guess.
-    """
     try:
         parsed = int(value)
     except TypeError, ValueError:

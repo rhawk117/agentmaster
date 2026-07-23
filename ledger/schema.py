@@ -1,16 +1,3 @@
-"""Ledger schema version and migration metadata (SPEC.md §16.3, §16.4).
-
-Schema DDL lives in `ledger/migrations/<name>/upgrade.sql`, one readable SQL
-file per migration, not as Python-embedded DDL; this module discovers those
-directories in lexicographic order and turns each into a `Migration` the
-runner in `ledger/migrations.py` applies.
-
-Pre-release policy: until v2.0.0 ships, agentmaster has no ledger in
-production use, so schema changes are made by editing
-`ledger/migrations/0001_initial/upgrade.sql` in place rather than adding a
-new migration; the chain only grows once v2.0.0 has released.
-"""
-
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,23 +13,12 @@ _SQL_TOKEN = re.compile(r"--[^\n]*|'(?:[^']|'')*'|;|\w+|.", re.DOTALL)
 
 @dataclass(frozen=True, slots=True)
 class Migration:
-    """One forward-only schema step and the version it produces."""
-
     to_version: int
     description: str
     apply: Callable[[sqlite3.Connection], None]
 
 
 def _split_statements(script: str) -> list[str]:
-    """Split a SQL script into statements, respecting `BEGIN...END` trigger bodies.
-
-    `sqlite3.Connection.executescript` implicitly commits any open
-    transaction before it runs and then executes every statement in
-    autocommit mode, so it cannot be used inside the migration runner's
-    explicit transaction: a failure partway through would leave earlier
-    statements already committed. Executing each split statement with
-    `execute()` instead keeps a whole migration atomic under one transaction.
-    """
     statements: list[str] = []
     buffer: list[str] = []
     depth = 0

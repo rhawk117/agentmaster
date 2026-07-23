@@ -1,5 +1,3 @@
-"""Tests for structured independent review recording (SPEC.md §20.3, §23 M21)."""
-
 import json
 import sqlite3
 import uuid
@@ -26,9 +24,6 @@ def _id() -> str:
 
 
 def _seed_delivery_attempt(connection, *, run_id: str, head_sha: str = _GOOD_SHA) -> str:
-    """A minimal DELIVERY_ATTEMPT row: real ingestion is Microtask 22's job, this
-    is only scaffolding so REVIEW's mandatory FK has a row to reference.
-    """
     delivery_attempt_id = _id()
     connection.execute(
         'INSERT INTO DELIVERY_ATTEMPT '
@@ -92,9 +87,6 @@ def store(tmp_path):
     return ArtifactStore(tmp_path / 'artifacts')
 
 
-# --- validate_review_result ---------------------------------------------------
-
-
 def test_validate_review_result_accepts_a_well_formed_good_result():
     validate_review_result(_result())
 
@@ -132,9 +124,6 @@ def test_validate_review_result_rejects_a_negative_line_no():
     finding = ReviewFindingInput(severity='minor', summary='nit', line_no=-1)
     with pytest.raises(MalformedReviewError, match='line_no'):
         validate_review_result(_result(verdict='NEEDS_FIXES', findings=(finding,)))
-
-
-# --- record_review: reviewer identity -----------------------------------------
 
 
 @pytest.mark.sqlite
@@ -175,9 +164,6 @@ def test_record_review_validates_before_writing_anything(ledger_connection, stor
 
     count = ledger_connection.execute('SELECT COUNT(*) FROM REVIEW').fetchone()[0]
     assert count == 0
-
-
-# --- record_review: round trip -------------------------------------------------
 
 
 @pytest.mark.sqlite
@@ -261,9 +247,6 @@ def test_record_review_with_no_findings_persists_an_empty_list(ledger_connection
     assert count == 0
 
 
-# --- schema-level FK/CHECK behavior --------------------------------------------
-
-
 @pytest.mark.sqlite
 def test_review_finding_fk_to_review_is_enforced(ledger_connection):
     with pytest.raises(sqlite3.IntegrityError):
@@ -296,10 +279,6 @@ def test_review_verdict_check_rejects_an_unenumerated_value(ledger_connection):
 
 @pytest.mark.sqlite
 def test_review_finding_severity_has_no_check_constraint(ledger_connection):
-    """§16.3: CHECK constraints are only for spec-enumerated closed sets; unlike
-    REVIEW.verdict (§20.3's explicit "GOOD | NEEDS_FIXES"), severity has no
-    spec-enumerated set, so any non-empty value is accepted at the schema level.
-    """
     seed = seed_project_run_task(ledger_connection)
     delivery_attempt_id = _seed_delivery_attempt(ledger_connection, run_id=seed.run_id)
     reviewer_session_id = _seed_agent_session(ledger_connection, run_id=seed.run_id)

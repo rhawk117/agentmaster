@@ -1,5 +1,3 @@
-"""Tests for `ledger.entrypoint_seed` (SPEC.md §17.1, §19, §23 Microtask 19)."""
-
 import itertools
 import json
 
@@ -186,7 +184,6 @@ def test_reseeding_deactivates_a_row_whose_source_vanished(
         "SELECT active FROM ENTRYPOINT WHERE kind = 'agent' AND name = 'implementer'"
     ).fetchone()
     assert row == (0,)
-    # Never deleted -- provenance is preserved.
     count = ledger_connection.execute('SELECT COUNT(*) FROM ENTRYPOINT').fetchone()[0]
     assert count == 2
 

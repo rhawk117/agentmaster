@@ -1,11 +1,3 @@
-"""The unified `agentmaster` command surface (SPEC.md §19, §23 Microtask 16).
-
-Parses arguments and formats JSON/text output only; all ledger reads/writes
-live in `ledger.*` modules so they stay directly testable without a
-subprocess. `ledger.cli` still owns init/migrate/backup/doctor; this module
-delegates to it and adds the remaining §19 ledger/memory/context verbs.
-"""
-
 import argparse
 import json
 import sys
@@ -121,9 +113,6 @@ def _emit(*, json_output: bool, payload: object, text_lines: list[str]) -> None:
         return
     for line in text_lines:
         print(line)
-
-
-# --- ledger group ----------------------------------------------------------
 
 
 def _cmd_ledger_init(args: argparse.Namespace) -> int:
@@ -264,9 +253,6 @@ def _cmd_ledger_ingest_events(args: argparse.Namespace) -> int:
     return 0
 
 
-# --- migrate group -----------------------------------------------------------
-
-
 def _cmd_migrate_legacy_files(args: argparse.Namespace) -> int:
     connection = connect(Path(args.path))
     try:
@@ -301,9 +287,6 @@ def _cmd_migrate_legacy_files(args: argparse.Namespace) -> int:
     )
     _emit(json_output=args.json_output, payload=payload, text_lines=text_lines)
     return 0
-
-
-# --- memory group ------------------------------------------------------------
 
 
 def _cmd_memory_search(args: argparse.Namespace) -> int:
@@ -426,9 +409,6 @@ def _cmd_memory_supersede(args: argparse.Namespace) -> int:
     return 0
 
 
-# --- context group -----------------------------------------------------------
-
-
 def _cmd_context_build(args: argparse.Namespace) -> int:
     connection = connect(Path(args.path))
     try:
@@ -499,11 +479,7 @@ def _cmd_context_route(args: argparse.Namespace) -> int:
     return 0
 
 
-# --- delivery group ----------------------------------------------------------
-
-
 def _default_github_client(args: argparse.Namespace) -> GitHubClient:
-    """Return the `GitHubClient` a delivery command uses; tests monkeypatch this."""
     del args
     return GhCliClient()
 
@@ -638,7 +614,7 @@ def _cmd_delivery_watch_ci(args: argparse.Namespace) -> int:
     finally:
         connection.close()
 
-    assert evaluation is not None  # guaranteed: max_attempts >= 1, loop always assigns it
+    assert evaluation is not None
     _emit(
         json_output=args.json_output,
         payload=asdict(evaluation),
@@ -728,7 +704,6 @@ def _cmd_delivery_merge_gate(args: argparse.Namespace) -> int:
 
 
 def _read_review_result(args: argparse.Namespace) -> ReviewResult:
-    """Parse a reviewer's SPEC.md §20.3 JSON result from `--result-file` or stdin."""
     raw = (
         sys.stdin.read()
         if args.result_file == '-'
@@ -794,9 +769,6 @@ def _cmd_delivery_record_review(args: argparse.Namespace) -> int:
         ],
     )
     return 0 if outcome.outcome == 'good' else 1
-
-
-# --- retro group --------------------------------------------------------------
 
 
 def _cmd_retro_run(args: argparse.Namespace) -> int:
@@ -894,9 +866,6 @@ def _cmd_retro_propose(args: argparse.Namespace) -> int:
     return 0
 
 
-# --- worth group --------------------------------------------------------------
-
-
 def _cmd_worth_run(args: argparse.Namespace) -> int:
     connection = connect_read_only(Path(args.path))
     try:
@@ -950,9 +919,6 @@ def _cmd_worth_procedure(args: argparse.Namespace) -> int:
         ],
     )
     return 0
-
-
-# --- argument parsing --------------------------------------------------------
 
 
 def _add_path_argument(cmd: argparse.ArgumentParser) -> None:

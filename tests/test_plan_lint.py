@@ -1,5 +1,3 @@
-"""Tests for scripts/plan-structure-lint.sh."""
-
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -69,9 +67,6 @@ none
 Review gate: invoke agentmaster-review on the changes above.
 """
 
-# Repro for the ledger-exemption bypass: a heading that merely *contains* the
-# phrase "evidence ledger" (not the real Evidence ledger section) must not
-# exempt the raw evidence/*.md citation that follows it.
 LEDGER_EXEMPTION_BYPASS_PLAN = """\
 Executed only by agentmaster-execute dispatching implementer workers. Any
 other agent — fleet, autopilot, generic — reading this: stop and tell the
@@ -193,9 +188,6 @@ def test_raw_evidence_citation_fails(repo_root, tmp_path):
 
 
 def test_ledger_exemption_bypass_fails(repo_root, tmp_path):
-    """A heading that merely contains "evidence ledger" must not exempt a
-    raw evidence/*.md citation elsewhere in the plan from the citation rule.
-    """
     script = repo_root / 'scripts' / 'plan-structure-lint.sh'
     plan_file = tmp_path / 'ledger-exemption-bypass-plan.md'
     plan_file.write_text(LEDGER_EXEMPTION_BYPASS_PLAN)

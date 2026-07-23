@@ -1,5 +1,3 @@
-"""Tests for the bounded git-publisher (SPEC.md §20.2, §23 Microtask 22)."""
-
 import shutil
 import subprocess
 
@@ -23,8 +21,6 @@ _GIT: str = _resolved_git
 
 
 class FakeGitHubClient:
-    """An in-memory `GitHubClient` fake; tests control its responses directly."""
-
     def __init__(self) -> None:
         self.pull_requests: dict[str, PullRequestRef] = {}
         self.created: list[dict] = []
@@ -147,7 +143,6 @@ def test_publish_refuses_to_stage_a_path_outside_the_manifest(repo):
     with pytest.raises(GitPublisherError, match='unexpected dirty path'):
         publish(manifest, github)
 
-    # Nothing was committed or pushed.
     assert _run(repo_path, 'log', '--oneline').count('\n') == 0
 
 
@@ -174,8 +169,6 @@ def test_push_never_issues_a_force_push_and_a_diverged_remote_is_rejected(repo):
     github = FakeGitHubClient()
     publish(manifest, github)
 
-    # Simulate a diverged remote: someone else pushed a different commit to
-    # the same feature branch after our publish.
     other_clone = repo_path.parent / 'other-clone'
     subprocess.run(  # noqa: S603
         [_GIT, 'clone', str(repo_path.parent / 'origin.git'), str(other_clone)],
@@ -189,9 +182,6 @@ def test_push_never_issues_a_force_push_and_a_diverged_remote_is_rejected(repo):
     _run(other_clone, 'commit', '-am', 'feat: diverge')
     _run(other_clone, 'push', 'origin', manifest.feature_branch)
 
-    # Our local repo now amends its own history on top of the old remote tip
-    # (simulating a rewrite) and tries to push again -- git must reject this
-    # as a non-fast-forward update since we never pass --force.
     _run(repo_path, 'commit', '--amend', '-m', 'feat: add feature (amended)')
 
     with pytest.raises(GitCommandError, match=r'non-fast-forward|fetch first|rejected'):

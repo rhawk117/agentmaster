@@ -1,5 +1,3 @@
-"""Tests for FEEDBACK recording (SPEC.md §17.2, §19, §23 Microtask 16)."""
-
 import pytest
 from conftest import seed_project_run_task
 

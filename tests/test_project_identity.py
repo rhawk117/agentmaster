@@ -1,5 +1,3 @@
-"""Tests for PROJECT identity in the execution schema (SPEC.md §17.1, §17.3)."""
-
 import sqlite3
 
 import pytest
@@ -33,7 +31,6 @@ def test_project_fingerprint_is_unique(tmp_path):
 
 @pytest.mark.sqlite
 def test_a_moved_checkout_relinks_without_a_new_project_row(tmp_path):
-    """Root aliasing (§17.3): the same fingerprint keeps the same project id."""
     connection = connect(tmp_path / 'ledger.sqlite3')
     migrate(connection)
     connection.execute(

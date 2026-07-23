@@ -1,5 +1,3 @@
-"""Tests for the Claude settings.json parse/validate/merge/strip logic."""
-
 import pytest
 
 from installer.claude_settings import (
@@ -132,7 +130,6 @@ def test_strip_hook_events_removes_only_exact_owned_entries():
 
 
 def test_strip_hook_events_preserves_user_edited_formerly_owned_entry():
-    """The whole point of owned-state tracking: an edited entry survives uninstall."""
     owned_entry = _entry(f'python3 "{MARKER}/dispatch_guard.py"')
     edited_entry = _entry(f'python3 "{MARKER}/dispatch_guard.py" --custom-flag')
     settings = {'hooks': {'PreToolUse': [edited_entry]}}
@@ -191,7 +188,6 @@ def test_strip_auto_compact_override_removes_key_when_no_original():
 
 
 def test_strip_auto_compact_override_leaves_user_edited_value_alone():
-    """The Claude-settings analogue of the hooks fix: a later user edit survives."""
     settings = {'env': {AUTO_COMPACT_ENV_KEY: 'user-changed-it'}}
     owned = {'value': '50', 'original': None}
 

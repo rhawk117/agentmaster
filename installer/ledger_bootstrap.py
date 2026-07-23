@@ -1,13 +1,3 @@
-"""Idempotent ledger bootstrap for the install CLI (SPEC.md §16.1).
-
-`bootstrap` establishes a least-privilege directory layout and the versioned
-SQLite schema via `ledger.migrations`, and refuses to touch an existing
-database whose schema is newer than this installer understands rather than
-risk creating an incompatible one. It also (re-)seeds the ENTRYPOINT registry
-(SPEC.md §23 Microtask 19) on every non-dry-run call, so a repeat `install.py
-install` picks up manifest/registry changes without a separate command.
-"""
-
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -30,14 +20,11 @@ __all__ = [
 ]
 
 
-class LedgerBootstrapError(ValueError):
-    """An existing ledger database's schema is newer than this installer understands."""
+class LedgerBootstrapError(ValueError): ...
 
 
 @dataclass(frozen=True, slots=True)
 class LedgerBootstrapPlan:
-    """Resolved ledger/artifact paths this bootstrap step will establish."""
-
     ledger_path: Path
     artifact_path: Path
 
@@ -74,20 +61,6 @@ def _seed_entrypoints(ledger_path: Path) -> None:
 
 
 def bootstrap(plan: LedgerBootstrapPlan, *, dry_run: bool) -> None:
-    """Validate, and (unless `dry_run`) create, the ledger and artifact paths.
-
-    Schema compatibility is checked even on a dry run (SPEC.md §11: "Dry-run
-    may read and validate the ledger"), but nothing is created until
-    `dry_run` is `False`. A second call against an already-bootstrapped,
-    compatible database re-seeds the ENTRYPOINT registry and is otherwise a
-    no-op.
-
-    Raises
-    ------
-    LedgerBootstrapError
-        The database at `plan.ledger_path` already exists and reports a
-        schema version newer than `SUPPORTED_SCHEMA_VERSION`.
-    """
     exists = plan.ledger_path.exists()
     if exists:
         version = _schema_version(plan.ledger_path)

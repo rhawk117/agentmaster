@@ -1,14 +1,3 @@
-"""Evidence sufficiency for task acceptance criteria (SPEC.md §9.4, §23 Microtask 20).
-
-SPEC.md §9.4: "A task is verifiable only when each acceptance criterion has
-at least one evidence record or an explicit reason that manual verification
-is required." `TASK.acceptance_json` holds a JSON array of criteria (each an
-object with at least `id`, optionally `manual_verification_reason`);
-`EVIDENCE.criterion_id` is the free-text join key a caller uses to attach an
-evidence row to one criterion (`ledger.evidence.record_command_evidence`).
-This module only reads those two; it records nothing itself.
-"""
-
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -17,14 +6,11 @@ if TYPE_CHECKING:
     import sqlite3
 
 
-class TaskNotFoundError(ValueError):
-    """No TASK row exists for the requested id."""
+class TaskNotFoundError(ValueError): ...
 
 
 @dataclass(frozen=True, slots=True)
 class AcceptanceCriterion:
-    """One parsed criterion from `TASK.acceptance_json`."""
-
     criterion_id: str
     text: str
     manual_verification_reason: str | None = None
@@ -32,16 +18,12 @@ class AcceptanceCriterion:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceGap:
-    """One acceptance criterion with neither evidence nor a manual-verification reason."""
-
     criterion_id: str
     reason: str
 
 
 @dataclass(frozen=True, slots=True)
 class EvidenceSufficiencyResult:
-    """The outcome of one `check_evidence_sufficiency` call."""
-
     sufficient: bool
     gaps: tuple[EvidenceGap, ...]
 
@@ -49,11 +31,6 @@ class EvidenceSufficiencyResult:
 def parse_acceptance_criteria(
     acceptance_json: str | None,
 ) -> tuple[AcceptanceCriterion, ...]:
-    """Parse `TASK.acceptance_json` into its acceptance criteria.
-
-    Returns an empty tuple for `None` or an empty JSON array — a task with no
-    recorded criteria has nothing to be insufficient about.
-    """
     if not acceptance_json:
         return ()
     return tuple(
@@ -78,13 +55,6 @@ def _evidenced_criterion_ids(connection: sqlite3.Connection, task_id: str) -> se
 def check_evidence_sufficiency(
     connection: sqlite3.Connection, task_id: str
 ) -> EvidenceSufficiencyResult:
-    """Check that every acceptance criterion on `task_id` is evidenced or excused.
-
-    Raises
-    ------
-    TaskNotFoundError
-        No TASK row exists for `task_id`.
-    """
     row = connection.execute(
         'SELECT acceptance_json FROM TASK WHERE id = ?', (task_id,)
     ).fetchone()

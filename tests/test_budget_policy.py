@@ -1,5 +1,3 @@
-"""Tests for per-run/per-task budget enforcement (SPEC.md §9, §23 MT20)."""
-
 from ledger.budget_policy import (
     Budget,
     BudgetUsage,

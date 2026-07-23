@@ -1,5 +1,3 @@
-"""Tests for the procedure/retrospective/evaluation schema (SPEC.md §17.2, §18)."""
-
 import sqlite3
 
 import pytest

@@ -1,16 +1,3 @@
-"""Deterministic review-gate transitions (SPEC.md §20.3, §23 Microtask 21).
-
-Applies one recorded reviewer result to `run_id`'s RUN state: GOOD is honored
-only when `reviewed_sha` matches the delivery attempt's exact current head
-("GOOD is valid only when reviewed_sha equals PR head and CI head"); a stale
-verdict (the head moved after review started) is recorded for audit but never
-applied, leaving the run's state untouched -- reconciling a moved head back
-onto the state machine is Microtask 22's job (git publisher), not this gate's.
-NEEDS_FIXES converts every returned finding into accepted task work and
-returns the run to FixesRequired, up to a capped retry ceiling after which the
-run fails with its unresolved findings surfaced.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -22,20 +9,14 @@ if TYPE_CHECKING:
 
     from ledger.artifact_store import ArtifactStore
 
-# SPEC.md §20.3 requires a cap ("Cap retry loops and surface unresolved
-# blockers to the user") but gives no specific number; 3 is a conservative,
-# adjustable default, not a spec-mandated value.
 MAX_REVIEW_ATTEMPTS = 3
 
 
-class DeliveryAttemptNotFoundError(ValueError):
-    """No DELIVERY_ATTEMPT row exists for the requested id."""
+class DeliveryAttemptNotFoundError(ValueError): ...
 
 
 @dataclass(frozen=True, slots=True)
 class ReviewGateInput:
-    """The run, recording, and transition inputs one `apply_review_result` call needs."""
-
     run_id: str
     review_input: RecordReviewInput
     transition: RunTransitionInput
@@ -43,8 +24,6 @@ class ReviewGateInput:
 
 @dataclass(frozen=True, slots=True)
 class ReviewGateOutcome:
-    """The result of applying one reviewer verdict to a delivery attempt's gate."""
-
     outcome: str
     review_id: str
     run_state: str
@@ -80,7 +59,6 @@ def _needs_fixes_review_count(
 def _accept_open_findings(
     connection: sqlite3.Connection, review_id: str
 ) -> tuple[str, ...]:
-    """Convert every open finding on `review_id` into accepted work, SPEC.md §20.3."""
     connection.execute(
         "UPDATE REVIEW_FINDING SET state = 'accepted' "
         "WHERE review_id = ? AND state = 'open'",
@@ -100,19 +78,6 @@ def apply_review_result(
     gate_input: ReviewGateInput,
     result: ReviewResult,
 ) -> ReviewGateOutcome:
-    """Record `result` and apply it to `gate_input.run_id`'s review gate.
-
-    Raises
-    ------
-    DeliveryAttemptNotFoundError
-        No DELIVERY_ATTEMPT row exists for `gate_input.review_input.
-        delivery_attempt_id`; checked first, so nothing is recorded for an
-        unknown attempt.
-    MalformedReviewError
-        `result` fails validation or reviewer-identity checks (`ledger.
-        review`); propagates before anything is recorded, per SPEC.md §20.3
-        ("a malformed result is a failed review, never GOOD").
-    """
     run_id, review_input, transition = (
         gate_input.run_id,
         gate_input.review_input,

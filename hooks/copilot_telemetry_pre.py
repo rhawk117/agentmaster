@@ -1,5 +1,3 @@
-"""Copilot preToolUse -> queue a start timestamp when the agent tool dispatches."""
-
 import json
 import re
 import time

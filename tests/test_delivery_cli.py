@@ -1,5 +1,3 @@
-"""Tests for the `agentmaster delivery` CLI commands (SPEC.md §19, §23 Microtask 22)."""
-
 import json
 import shutil
 import subprocess
@@ -21,8 +19,6 @@ _GIT: str = _resolved_git
 
 
 class FakeGitHubClient:
-    """An in-memory `GitHubClient` fake injected via `_default_github_client`."""
-
     def __init__(self) -> None:
         self.pull_requests: dict[str, PullRequestRef] = {}
         self.check_runs: list = []

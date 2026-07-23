@@ -1,13 +1,3 @@
-"""Claude Code install target — composes skills, workers, and the hook layer.
-
-Ports the behaviour of the retired shell installer: a completeness
-preflight over the bundle sources, then a single transactional `apply_plans`
-call that places skill trees, rendered worker agents, the lifecycle hooks,
-and the merged `settings.json` / Agentmaster `config.toml` / owned-state
-document all in one batch, so a failure partway through rolls every one of
-them back together.
-"""
-
 import json
 import os
 from dataclasses import dataclass, field
@@ -77,7 +67,6 @@ def _skill_overrides(skill: str, roles: ClaudeRoleConfig) -> dict[str, str] | No
 
 
 def default_home() -> Path:
-    """Return the Claude config dir — `CLAUDE_CONFIG_DIR` if set, else `~/.claude`."""
     override = os.environ.get('CLAUDE_CONFIG_DIR')
     if override:
         return Path(override)
@@ -180,12 +169,6 @@ def _managed_plans(
     auto_compact: AutoCompactOverride,
     launcher: Path,
 ) -> list[FilePlan]:
-    """Compute the settings.json / config.toml / owned-state.json / runtime.json plans.
-
-    Reads and shape-validates each existing file (failing closed on
-    malformed content) before any write; the caller folds the result into
-    the same `apply_plans` batch as the skill/agent/hook plans.
-    """
     agentmaster_home = resolved.agentmaster_home.resolve()
     settings_path = home / 'settings.json'
     settings_text = _read_text(settings_path)
@@ -270,11 +253,6 @@ def _managed_plans(
 
 
 def _strip_settings(home: Path, agentmaster_home: Path) -> dict | None:
-    """Compute settings.json with only exactly-owned entries removed.
-
-    Returns `None` when there is no settings.json to strip. Called before
-    any deletion so malformed settings fail closed before removal (§14).
-    """
     settings_path = home / 'settings.json'
     settings_text = _read_text(settings_path)
     if settings_text is None:
@@ -289,8 +267,6 @@ def _strip_settings(home: Path, agentmaster_home: Path) -> dict | None:
 
 @dataclass(frozen=True, slots=True)
 class ClaudeInstallOptions:
-    """Per-call Claude installer inputs beyond the source root and target home."""
-
     roles: ClaudeRoleConfig
     resolved: ResolvedConfig
     auto_compact: AutoCompactOverride = field(
@@ -300,13 +276,6 @@ class ClaudeInstallOptions:
 
 
 def install(root: Path, home: Path, options: ClaudeInstallOptions) -> InstallReport:
-    """Install skills, workers, hooks, and managed settings/config transactionally.
-
-    `settings.json`, Agentmaster's `config.toml`, and the owned-state
-    document are computed as plain file plans and applied in the same
-    `apply_plans` batch as everything else — no target mutates settings
-    outside the plan, and a failure partway through rolls all of them back.
-    """
     home = home.resolve()
     roles, resolved, auto_compact, manifest = (
         options.roles,
@@ -336,11 +305,6 @@ def uninstall(
     dry_run: bool,
     manifest: Manifest = MANIFEST,
 ) -> InstallReport:
-    """Remove agentmaster skills, agents, and hooks; strip only owned settings entries.
-
-    Settings are validated and the stripped result computed before any
-    deletion, so malformed settings fail closed before anything is removed.
-    """
     home = home.resolve()
     agentmaster_home = agentmaster_home.resolve()
     stripped_settings = _strip_settings(home, agentmaster_home)

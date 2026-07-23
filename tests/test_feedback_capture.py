@@ -1,7 +1,3 @@
-"""Tests for the feedback-capture loop attached at RUN completion
-(SPEC.md §9.1, §17.2, §17.4, §23 Microtask 26).
-"""
-
 from typing import TYPE_CHECKING
 
 import pytest
@@ -193,10 +189,6 @@ def test_register_feedback_capture_hook_is_idempotent():
 def test_run_completion_hook_fires_capture_feedback_without_blocking_completion(
     ledger_connection,
 ):
-    """A completed RUN transition still succeeds when the hook's prompt is skipped
-    (non-interactive session, SPEC.md §9.1: "a feedback prompt never blocks the
-    transition to Complete from completing").
-    """
     from ledger.orchestrator_state import RunTransitionInput, transition_run
 
     seed = seed_project_run_task(ledger_connection)
