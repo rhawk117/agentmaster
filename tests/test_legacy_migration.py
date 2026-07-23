@@ -1,5 +1,3 @@
-"""Tests for `ledger.legacy_migration` (SPEC.md §19, §23 Microtask 17)."""
-
 import itertools
 
 import pytest

@@ -1,20 +1,3 @@
-"""Memory search/show/lifecycle service behind `agentmaster memory` (SPEC.md §17.3-19).
-
-Deferred from Microtask 14/15's schema-only work: this module adds the
-retrieval and lifecycle-transition behavior those schemas support.
-
-`MEMORY.proposing_session_id` records which session proposed a candidate, so
-`validate_memory` enforces §17.4's session-independence rule ("evidence not
-authored solely by the same session that proposed the candidate"): a
-validating session id is mandatory, with no argument value that skips the
-check. The schema does not yet record which
-project(s) supplied validating evidence, so the deeper §17.4 policy check
-("successful evidence from at least two distinct projects") remains left to
-a future schema change; this module enforces the state-machine legality the
-diagram in §17.4 defines and the evidence linkage §17.3 requires ("All
-conclusions link to evidence").
-"""
-
 import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -37,23 +20,18 @@ _LEGAL_TRANSITIONS: dict[str, tuple[str, ...]] = {
 }
 
 
-class MemoryNotFoundError(ValueError):
-    """No MEMORY row exists for the requested id."""
+class MemoryNotFoundError(ValueError): ...
 
 
-class IllegalMemoryTransitionError(ValueError):
-    """The requested state transition is not permitted by SPEC.md §17.4."""
+class IllegalMemoryTransitionError(ValueError): ...
 
 
 def estimate_tokens(text: str) -> int:
-    """Cheap, dependency-free token estimate (~4 characters per token)."""
     return max(1, len(text) // _TOKEN_ESTIMATE_CHARS_PER_TOKEN)
 
 
 @dataclass(frozen=True, slots=True)
 class MemorySearchScope:
-    """Who is asking and where their search results get logged (SPEC.md §17.5)."""
-
     project_id: str
     run_id: str
     task_id: str | None = None
@@ -62,8 +40,6 @@ class MemorySearchScope:
 
 @dataclass(frozen=True, slots=True)
 class MemorySearchResult:
-    """One ranked memory candidate returned from `search_memories`."""
-
     memory_id: str
     title: str
     content: str
@@ -76,8 +52,6 @@ class MemorySearchResult:
 
 @dataclass(frozen=True, slots=True)
 class MemoryAccessLog:
-    """How to mint and timestamp the `memory_access` rows a search logs (§17.5)."""
-
     access_id_factory: Callable[[], str]
     created_at: str
 
@@ -90,14 +64,6 @@ def search_memories(
     *,
     limit: int = 10,
 ) -> list[MemorySearchResult]:
-    """Full-text search active/validated memories visible to `scope.project_id`.
-
-    Matches project-scoped memories for `scope.project_id` plus global
-    memories (SPEC.md §17.3: "Default retrieval includes the current project
-    plus validated global memory"), then logs one `memory_access` row per
-    returned candidate with its rank, score, and estimated token count
-    (§17.5), using `access_log.access_id_factory()` to mint each row's id.
-    """
     rows = connection.execute(
         'SELECT m.id, m.title, m.content, m.memory_kind, m.confidence, '
         'bm25(memory_fts) AS bm25_score '
@@ -120,7 +86,7 @@ def search_memories(
             memory_kind=row[3],
             confidence=row[4],
             rank=rank,
-            score=-row[5],  # bm25() is lower-is-better; negate so higher score wins
+            score=-row[5],
             estimated_tokens=estimate_tokens(row[2]),
         )
         for rank, row in enumerate(rows)
@@ -156,8 +122,6 @@ def search_memories(
 
 @dataclass(frozen=True, slots=True)
 class MemoryDetail:
-    """The full MEMORY row for `agentmaster memory show`."""
-
     memory_id: str
     state: str
     memory_kind: str
@@ -172,7 +136,6 @@ class MemoryDetail:
 
 
 def show_memory(connection: sqlite3.Connection, memory_id: str) -> MemoryDetail | None:
-    """Return the MEMORY row for `memory_id`, or `None` if it does not exist."""
     row = connection.execute(
         'SELECT id, state, memory_kind, title, content, confidence, usefulness_count, '
         'harmful_count, origin_project_id, created_at, updated_at '
@@ -219,19 +182,6 @@ def validate_memory(
     updated_at: str,
     validating_session_id: str | None,
 ) -> None:
-    """Transition a Candidate memory to Validated and link its supporting evidence.
-
-    Refuses the transition if `validating_session_id` matches the memory's
-    `proposing_session_id`: SPEC.md §17.4 requires "evidence not authored
-    solely by the same session that proposed the candidate." A validating
-    session id is mandatory: passing `None` is rejected with a structured
-    error rather than skipping the check.
-
-    Raises
-    ------
-    IllegalMemoryTransitionError
-        `validating_session_id` is `None`, or matches the proposing session.
-    """
     if validating_session_id is None:
         raise IllegalMemoryTransitionError(
             f'{memory_id}: a validating session id is required (SPEC.md §17.4)'
@@ -264,14 +214,12 @@ def validate_memory(
 def activate_memory(
     connection: sqlite3.Connection, memory_id: str, *, updated_at: str
 ) -> None:
-    """Transition a Validated memory to Active (approved scope, SPEC.md §17.4)."""
     _transition(connection, memory_id, 'Active', updated_at=updated_at)
 
 
 def reject_memory(
     connection: sqlite3.Connection, memory_id: str, *, updated_at: str
 ) -> None:
-    """Transition a Candidate or Active memory to Rejected (SPEC.md §17.4)."""
     current = _current_state(connection, memory_id)
     if current not in ('Candidate', 'Active'):
         raise IllegalMemoryTransitionError(
@@ -282,8 +230,6 @@ def reject_memory(
 
 @dataclass(frozen=True, slots=True)
 class NewMemoryInput:
-    """The new MEMORY row `supersede_memory` creates in place of the old one."""
-
     id: str
     origin_project_id: str
     memory_kind: str
@@ -299,12 +245,6 @@ def supersede_memory(
     *,
     updated_at: str,
 ) -> str:
-    """Archive-track `old_memory_id` as Superseded and create `new_memory` as Active.
-
-    Copies the old memory's MEMORY_SCOPE rows onto the new memory and records
-    a `supersedes` MEMORY_LINK, matching SPEC.md §17.4: "Supersession creates
-    a new memory and link; it does not overwrite history."
-    """
     _transition(connection, old_memory_id, 'Superseded', updated_at=updated_at)
     scopes = connection.execute(
         'SELECT scope_kind, project_id, include_descendants FROM MEMORY_SCOPE '

@@ -1,5 +1,3 @@
-"""Tests for §9.4 evidence sufficiency: every criterion evidenced or excused."""
-
 import json
 
 import pytest

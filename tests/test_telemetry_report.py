@@ -1,5 +1,3 @@
-"""Tests for the telemetry report and prune tool."""
-
 import os
 import subprocess
 import sys
@@ -47,12 +45,12 @@ def test_prune_trims_lines_snapshots_and_stale_starts(tmp_path):
 
     kept = (am / 'telemetry.md').read_text(encoding='utf-8').splitlines()
     assert len(kept) == 500
-    assert kept[-1] == 'hook,scout,,599,599'  # newest lines survive
+    assert kept[-1] == 'hook,scout,,599,599'
     snaps = sorted(p.name for p in (am / 'compaction-snapshots').iterdir())
     assert snaps == [f'20260101-00000{n}' for n in range(2, 7)]
     assert not (am / '.starts' / 'old-agent').exists()
     assert (am / '.starts' / 'fresh-agent').exists()
-    assert len(actions) == 4  # 1 telemetry + 2 snapshots + 1 stale start
+    assert len(actions) == 4
 
 
 def test_prune_dry_run_changes_nothing(tmp_path):
@@ -60,7 +58,7 @@ def test_prune_dry_run_changes_nothing(tmp_path):
 
     actions = prune(am, keep_lines=500, keep_snapshots=5, dry_run=True)
 
-    assert actions  # same actions reported...
+    assert actions
     assert len((am / 'telemetry.md').read_text().splitlines()) == 600
     assert len(list((am / 'compaction-snapshots').iterdir())) == 7
     assert (am / '.starts' / 'old-agent').exists()
@@ -131,7 +129,7 @@ def test_report_summarizes_phases_and_models(tmp_path):
     assert 'review' in result.stdout
     assert 'model' in result.stdout
     assert 'claude-haiku-4-5' in result.stdout
-    assert '150' in result.stdout  # plan-phase token subtotal
+    assert '150' in result.stdout
 
 
 def test_prune_removes_stale_phase_marker(tmp_path):

@@ -1,5 +1,3 @@
-"""Tests for the execution/token-accounting schema (SPEC.md §23 Microtask 12, §17.1)."""
-
 import sqlite3
 
 import pytest

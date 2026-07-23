@@ -1,5 +1,3 @@
-"""Tests for the ledger_health record (SPEC.md §16.1)."""
-
 import pytest
 
 from ledger.connection import connect

@@ -1,5 +1,3 @@
-"""Tests for deterministic risk routing and scout policy (SPEC.md §23 MT20)."""
-
 from ledger.risk_routing import (
     ImplementerScoutPolicy,
     RiskFactors,

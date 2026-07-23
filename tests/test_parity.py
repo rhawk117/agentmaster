@@ -1,5 +1,3 @@
-"""Parity tests for single-sourced worker agent definitions."""
-
 import re
 
 import pytest

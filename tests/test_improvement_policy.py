@@ -1,7 +1,3 @@
-"""Tests for the retrospective loop and cross-project promotion policy
-(SPEC.md §18, §20.4, §23 Microtask 23).
-"""
-
 from typing import TYPE_CHECKING
 
 import pytest
@@ -108,9 +104,6 @@ def _read_only(tmp_path) -> sqlite3.Connection:
     return connect_read_only(tmp_path / 'ledger.sqlite3')
 
 
-# --- gather_observations -----------------------------------------------------
-
-
 @pytest.mark.sqlite
 def test_gather_observations_reports_the_run_outcome(ledger_connection, tmp_path):
     seed = seed_project_run_task(ledger_connection)
@@ -181,9 +174,6 @@ def test_gather_observations_includes_feedback(ledger_connection, tmp_path):
     assert 'nice work' in feedback_observations[0].claim
 
 
-# --- run_retrospective --------------------------------------------------------
-
-
 @pytest.mark.sqlite
 def test_run_retrospective_rejects_a_run_not_yet_retrospective_pending(
     ledger_connection, tmp_path
@@ -250,9 +240,6 @@ def test_run_retrospective_is_idempotent_on_retry(ledger_connection, tmp_path):
     assert observation_count == len(first.observation_ids)
 
 
-# --- propose_memory_candidate --------------------------------------------------
-
-
 @pytest.mark.sqlite
 def test_propose_memory_candidate_creates_a_project_scoped_candidate(
     ledger_connection,
@@ -312,9 +299,6 @@ def test_propose_memory_candidate_creates_a_project_scoped_candidate(
         (memory_id,),
     ).fetchone()
     assert (relation, observation_id) == ('proposes', 'obs-1')
-
-
-# --- cross-project promotion policy (confirmation-bias resistant) ------------
 
 
 def _seed_project(connection: sqlite3.Connection, project_id: str) -> None:

@@ -1,5 +1,3 @@
-"""Tests for `ledger.event_spool` (SPEC.md §16.1, §19, §23 Microtask 17)."""
-
 import json
 
 from ledger.event_spool import read_events

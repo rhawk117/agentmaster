@@ -1,5 +1,3 @@
-"""Tests for `ledger.ingestion` (SPEC.md §16.3, §17, §19, §23 Microtask 17)."""
-
 import itertools
 import json
 
@@ -274,8 +272,6 @@ def test_ingest_replaying_the_same_agent_session_event_does_not_double_count_tok
     _write_event(spool, '1.json', event)
     ingest_pending_events(ledger_connection, spool, id_factory=_id_factory(), now=_now)
 
-    # A second, independent batch replays the identical event (e.g. a retried
-    # ingestion run) — must not create a second MODEL_CALL/AGENT_SESSION row.
     _write_event(spool, '2.json', event)
     ingest_pending_events(ledger_connection, spool, id_factory=_id_factory(), now=_now)
 

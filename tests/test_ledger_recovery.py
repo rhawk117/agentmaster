@@ -1,10 +1,3 @@
-"""Ledger recovery and compatibility tests (SPEC.md §16, Microtask 11).
-
-Covers the failure-mode and edge-case resilience scenarios: failed migration
-rollback, refusing a newer schema version, a corrupt database file, read-only
-access, and an exhausted BUSY retry ceiling.
-"""
-
 import sqlite3
 
 import pytest
@@ -79,7 +72,7 @@ def test_cmd_doctor_works_on_a_read_only_ledger_file(tmp_path):
 @pytest.mark.sqlite
 def test_cmd_migrate_on_a_read_only_ledger_fails_closed(tmp_path):
     ledger_path = tmp_path / 'ledger.sqlite3'
-    sqlite3.connect(ledger_path).close()  # fresh, unmigrated database at version 0
+    sqlite3.connect(ledger_path).close()
     ledger_path.chmod(0o400)
 
     try:

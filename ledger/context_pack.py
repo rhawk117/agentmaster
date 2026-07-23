@@ -1,13 +1,3 @@
-"""Bounded, session-scoped context-pack builder (SPEC.md §9.3, §19, §23 Microtask 16).
-
-Builds the pack contents SPEC.md §9.3 names for a dispatched agent: task and
-project identity, selected memories with rank, the project's active
-procedure versions, required evidence kinds, and a token budget with stop
-conditions. Memory retrieval and its digest are recorded via
-`ledger.memory_service.search_memories`, which logs one `memory_access` row
-per candidate.
-"""
-
 import hashlib
 import json
 import uuid
@@ -24,7 +14,6 @@ from ledger.memory_service import (
 if TYPE_CHECKING:
     import sqlite3
 
-# SPEC.md §9.4: the fixed set of evidence kinds acceptable for a criterion.
 REQUIRED_EVIDENCE_KINDS: tuple[str, ...] = (
     'test-result',
     'command-result',
@@ -36,22 +25,17 @@ REQUIRED_EVIDENCE_KINDS: tuple[str, ...] = (
 )
 
 
-class SessionScopeError(ValueError):
-    """The requested run/task does not belong to the given user session/project."""
+class SessionScopeError(ValueError): ...
 
 
-class RunNotFoundError(ValueError):
-    """No RUN row exists for the requested id."""
+class RunNotFoundError(ValueError): ...
 
 
-class TaskNotFoundError(ValueError):
-    """No TASK row exists for the requested id."""
+class TaskNotFoundError(ValueError): ...
 
 
 @dataclass(frozen=True, slots=True)
 class ContextPackRequest:
-    """The bounded inputs needed to build one task's context pack."""
-
     project_id: str
     user_session_id: str
     run_id: str
@@ -62,8 +46,6 @@ class ContextPackRequest:
 
 @dataclass(frozen=True, slots=True)
 class SelectedMemory:
-    """One memory selected into a context pack, with its retrieval rank."""
-
     memory_id: str
     title: str
     rank: int
@@ -73,8 +55,6 @@ class SelectedMemory:
 
 @dataclass(frozen=True, slots=True)
 class ContextPack:
-    """A bounded, project-filtered context pack (SPEC.md §9.3)."""
-
     task_id: str
     project_id: str
     run_id: str
@@ -144,16 +124,6 @@ def _select_within_budget(
 def build_context_pack(
     connection: sqlite3.Connection, request: ContextPackRequest, *, created_at: str
 ) -> ContextPack:
-    """Build a bounded context pack for `request`, scoped to its user session.
-
-    Raises
-    ------
-    SessionScopeError
-        `request.run_id` does not belong to `request.user_session_id`, or
-        `request.task_id` does not belong to `request.run_id`.
-    RunNotFoundError, TaskNotFoundError
-        The named run or task does not exist.
-    """
     run_user_session_id = _run_user_session_id(connection, request.run_id)
     if run_user_session_id != request.user_session_id:
         raise SessionScopeError(

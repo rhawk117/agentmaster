@@ -1,19 +1,3 @@
-"""Bounded git-publisher operations (SPEC.md §20.2, §23 Microtask 22).
-
-The publisher receives an approved `PublicationManifest` -- repository, base
-branch/SHA, feature branch, explicit paths, commit/PR text, merge policy --
-and refuses anything that manifest does not authorize (§20.2: "It must refuse
-to stage unexpected paths; rewrite history or force-push; ..."). Every git
-mutation here takes no force/rewrite parameter at all, so there is no code
-path that could be asked to force-push or delete a ref this module did not
-itself create: `push_branch` always pushes a plain fast-forward update of
-exactly `feature_branch`, and the only ref deletion (an already-merged
-branch) is delegated to the injected `GitHubClient`, never performed locally.
-`GitHubClient` is a `Protocol` so tests inject a fake instead of talking to
-GitHub; `publish` reconciles an existing branch/PR/merge state on retry
-instead of duplicating work.
-"""
-
 import json
 import re
 import shutil
@@ -26,19 +10,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _SHA_RE = re.compile(r'^[0-9a-f]{40}$')
-# A ref/branch argument starting with '-' could be parsed as a git flag
-# instead of a name (classic argument injection); refuse it before it ever
-# reaches a subprocess argv.
 _UNSAFE_REF_RE = re.compile(r'^-')
 
 
-class GitPublisherError(ValueError):
-    """A publication manifest or requested operation violates a §20.2 refusal rule."""
+class GitPublisherError(ValueError): ...
 
 
 class GitCommandError(RuntimeError):
-    """A `git` subprocess invocation exited non-zero."""
-
     def __init__(self, args: Sequence[str], returncode: int, stderr: str) -> None:
         super().__init__(f'{" ".join(args)!r} exited {returncode}: {stderr.strip()}')
         self.returncode = returncode
@@ -47,8 +25,6 @@ class GitCommandError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class PublicationManifest:
-    """The approved publication manifest a git-publisher call receives (§20.2)."""
-
     repo_path: Path
     base_branch: str
     base_sha: str
@@ -66,8 +42,6 @@ class PublicationManifest:
 
 @dataclass(frozen=True, slots=True)
 class PullRequestRef:
-    """One pull request as reported by a `GitHubClient`."""
-
     number: int
     url: str
     head_sha: str
@@ -76,8 +50,6 @@ class PullRequestRef:
 
 @dataclass(frozen=True, slots=True)
 class CreatePullRequestInput:
-    """Everything a `GitHubClient.create_pull_request` call needs."""
-
     repo_path: Path
     base: str
     head: str
@@ -88,8 +60,6 @@ class CreatePullRequestInput:
 
 @dataclass(frozen=True, slots=True)
 class CheckRunObservation:
-    """One observed check-run, as `GitHubClient.list_check_runs` reports it."""
-
     name: str
     head_sha: str
     status: str
@@ -99,23 +69,15 @@ class CheckRunObservation:
 
 
 class GitHubClient(Protocol):
-    """The GitHub operations a git-publisher call needs; fake this in tests."""
-
     def find_pull_request(
         self, *, repo_path: Path, head_branch: str
-    ) -> PullRequestRef | None:
-        """Return the open/merged/closed PR for `head_branch`, or `None`."""
-        ...
+    ) -> PullRequestRef | None: ...
 
-    def create_pull_request(self, request: CreatePullRequestInput) -> PullRequestRef:
-        """Open a new PR and return its reference."""
-        ...
+    def create_pull_request(self, request: CreatePullRequestInput) -> PullRequestRef: ...
 
     def list_check_runs(
         self, *, repo_path: Path, head_sha: str
-    ) -> tuple[CheckRunObservation, ...]:
-        """Return every check-run GitHub currently reports for `head_sha`."""
-        ...
+    ) -> tuple[CheckRunObservation, ...]: ...
 
     def merge_pull_request(
         self,
@@ -124,15 +86,11 @@ class GitHubClient(Protocol):
         number: int,
         strategy: str,
         delete_branch: bool,
-    ) -> None:
-        """Merge PR `number`. Never called with a force/admin-override option."""
-        ...
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
 class PublicationResult:
-    """The outcome of one `publish` call: the pushed head and its PR."""
-
     head_sha: str
     pull_request: PullRequestRef
     reused_existing_pr: bool
@@ -148,7 +106,7 @@ def _git_executable() -> str:
 
 def _run_git(repo_path: Path, *args: str) -> str:
     argv = (_git_executable(), *args)
-    result = subprocess.run(  # noqa: S603 -- argv list, no shell, git resolved via PATH
+    result = subprocess.run(  # noqa: S603
         argv,
         cwd=repo_path,
         capture_output=True,
@@ -179,28 +137,17 @@ def _validate_manifest(manifest: PublicationManifest) -> None:
 
 
 def _status_paths(repo_path: Path) -> tuple[str, ...]:
-    """Return every path `git status --porcelain` reports as changed/untracked."""
     output = _run_git(repo_path, 'status', '--porcelain')
     paths: list[str] = []
     for line in output.splitlines():
         if not line:
             continue
-        # porcelain format: "XY path" or "XY orig -> path" for renames.
         path = line[3:].split(' -> ')[-1].strip()
         paths.append(path)
     return tuple(paths)
 
 
 def verify_expected_dirty_paths(manifest: PublicationManifest) -> tuple[str, ...]:
-    """Return the repo's current dirty paths, refusing any outside the manifest.
-
-    Raises
-    ------
-    GitPublisherError
-        A path reported by `git status` is not in `manifest.allowed_paths` or
-        `manifest.expected_dirty_paths` (§20.2: "refuse to stage unexpected
-        paths").
-    """
     permitted = set(manifest.allowed_paths) | set(manifest.expected_dirty_paths)
     dirty = _status_paths(manifest.repo_path)
     unexpected = [path for path in dirty if path not in permitted]
@@ -212,7 +159,6 @@ def verify_expected_dirty_paths(manifest: PublicationManifest) -> tuple[str, ...
 
 
 def checkout_feature_branch(manifest: PublicationManifest) -> None:
-    """Create or check out `manifest.feature_branch`, idempotent for a retry."""
     existing = _run_git(
         manifest.repo_path, 'branch', '--list', manifest.feature_branch
     ).strip()
@@ -223,13 +169,6 @@ def checkout_feature_branch(manifest: PublicationManifest) -> None:
 
 
 def stage_paths(manifest: PublicationManifest) -> tuple[str, ...]:
-    """Stage exactly `manifest.allowed_paths`' dirty members; refuse anything else.
-
-    Raises
-    ------
-    GitPublisherError
-        `verify_expected_dirty_paths` rejects the repository's current state.
-    """
     dirty = set(verify_expected_dirty_paths(manifest))
     to_stage = tuple(path for path in manifest.allowed_paths if path in dirty)
     if to_stage:
@@ -238,18 +177,6 @@ def stage_paths(manifest: PublicationManifest) -> tuple[str, ...]:
 
 
 def commit_changes(manifest: PublicationManifest) -> str:
-    """Commit staged changes and return the new HEAD SHA.
-
-    If nothing is staged and HEAD already differs from `manifest.base_sha`,
-    a prior attempt already committed -- this is a retry, not an error, and
-    the existing HEAD SHA is returned unchanged.
-
-    Raises
-    ------
-    GitPublisherError
-        Nothing is staged and HEAD still matches `manifest.base_sha` (no
-        work exists to commit).
-    """
     staged = _run_git(manifest.repo_path, 'diff', '--cached', '--name-only').strip()
     head = _run_git(manifest.repo_path, 'rev-parse', 'HEAD').strip()
     if not staged:
@@ -261,16 +188,6 @@ def commit_changes(manifest: PublicationManifest) -> str:
 
 
 def verify_branch_ancestry(manifest: PublicationManifest) -> None:
-    """Refuse to push if the feature branch's history diverges from `base_sha`.
-
-    Raises
-    ------
-    GitPublisherError
-        `git merge-base` between `manifest.feature_branch` and `manifest.
-        base_branch` is not exactly `manifest.base_sha` -- the branch carries
-        commits this manifest did not authorize (§20.2: "feature branch and
-        allowed commits").
-    """
     merge_base = _run_git(
         manifest.repo_path,
         'merge-base',
@@ -285,7 +202,6 @@ def verify_branch_ancestry(manifest: PublicationManifest) -> None:
 
 
 def push_branch(manifest: PublicationManifest) -> None:
-    """Push `manifest.feature_branch` to `origin`. Never force, never rewrites."""
     _run_git(
         manifest.repo_path,
         'push',
@@ -295,15 +211,6 @@ def push_branch(manifest: PublicationManifest) -> None:
 
 
 def validate_pr_template(manifest: PublicationManifest) -> None:
-    """Validate `manifest.pr_body` covers the repo's PR template and evidence links.
-
-    Raises
-    ------
-    GitPublisherError
-        A `## `-headed section from `.github/PULL_REQUEST_TEMPLATE.md` is
-        missing from `pr_body`, or `evidence_links` is empty or one of its
-        entries does not appear in `pr_body`.
-    """
     template_path = manifest.repo_path / '.github' / 'PULL_REQUEST_TEMPLATE.md'
     if template_path.exists():
         required_sections = [
@@ -326,12 +233,6 @@ def validate_pr_template(manifest: PublicationManifest) -> None:
 def reconcile_or_create_pull_request(
     manifest: PublicationManifest, github: GitHubClient
 ) -> tuple[PullRequestRef, bool]:
-    """Return the existing PR for the feature branch, or validate and create one.
-
-    Returns
-    -------
-    A `(pull_request, reused_existing)` pair.
-    """
     existing = github.find_pull_request(
         repo_path=manifest.repo_path, head_branch=manifest.feature_branch
     )
@@ -352,17 +253,6 @@ def reconcile_or_create_pull_request(
 
 
 def publish(manifest: PublicationManifest, github: GitHubClient) -> PublicationResult:
-    """Stage, commit, push, and open (or reconcile) a PR for `manifest`.
-
-    Idempotent for retry: an already-merged PR short-circuits without a new
-    push or commit; an already-open PR for the feature branch is reused
-    rather than duplicated.
-
-    Raises
-    ------
-    GitPublisherError
-        Any §20.2 refusal rule rejects the manifest or repository state.
-    """
     _validate_manifest(manifest)
     checkout_feature_branch(manifest)
 
@@ -393,8 +283,6 @@ def publish(manifest: PublicationManifest, github: GitHubClient) -> PublicationR
 
 @dataclass(frozen=True, slots=True)
 class MergeRequest:
-    """Everything a `merge_pull_request` call needs besides the client and PR."""
-
     repo_path: Path
     merge_strategy: str
     delete_branch_on_merge: bool
@@ -404,17 +292,6 @@ class MergeRequest:
 def merge_pull_request(
     github: GitHubClient, pull_request: PullRequestRef, request: MergeRequest
 ) -> None:
-    """Merge `pull_request`, refusing unless its head is exactly the expected SHA.
-
-    This is defense-in-depth alongside `ledger.delivery_gate`'s merge gate:
-    the publisher itself refuses "to merge a head different from the
-    reviewed and green SHA" (§20.2) even if a caller skipped that gate.
-
-    Raises
-    ------
-    GitPublisherError
-        `pull_request.head_sha` does not equal `request.expected_head_sha`.
-    """
     if pull_request.head_sha != request.expected_head_sha:
         raise GitPublisherError(
             f'refusing to merge: PR head {pull_request.head_sha!r} != '
@@ -428,7 +305,6 @@ def merge_pull_request(
     )
 
 
-# GitHub check-run states that are not yet a terminal completed result.
 _GH_IN_PROGRESS_STATES = frozenset({'PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED'})
 _GH_MERGE_STRATEGY_FLAGS = {
     'squash': '--squash',
@@ -438,19 +314,12 @@ _GH_MERGE_STRATEGY_FLAGS = {
 
 
 class GhCliClient:
-    """Production `GitHubClient` backed by the `gh` CLI.
-
-    Never exercised against a real GitHub remote in this test suite -- every
-    test injects a fake `GitHubClient` instead (SPEC.md §23 Microtask 22
-    scope: "tests using local git fixtures/fake GitHub responses").
-    """
-
     def _gh(self, repo_path: Path, *args: str) -> str:
         resolved = shutil.which('gh')
         if resolved is None:
             raise GitCommandError(('gh',), -1, 'gh executable not found on PATH')
         argv = (resolved, *args)
-        result = subprocess.run(  # noqa: S603 -- argv list, no shell, gh resolved via PATH
+        result = subprocess.run(  # noqa: S603
             argv,
             cwd=repo_path,
             capture_output=True,
@@ -502,7 +371,7 @@ class GhCliClient:
         created = self.find_pull_request(
             repo_path=request.repo_path, head_branch=request.head
         )
-        if created is None:  # pragma: no cover -- gh reported success but no PR found
+        if created is None:  # pragma: no cover
             raise GitCommandError(('gh', 'pr', 'create'), -1, 'PR not found after create')
         return created
 

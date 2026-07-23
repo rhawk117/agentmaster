@@ -1,13 +1,3 @@
-"""Installer configuration domain: typed records and pure resolution logic.
-
-`UnresolvedConfig` mirrors the CLI surface one flag at a time; `resolve()`
-applies precedence (CLI > `--config` TOML > built-in default) and produces a
-`ResolvedConfig` ready to act on. Everything here is plain data and pure
-functions — no filesystem or TTY access — so tests exercise resolution
-without a subprocess. `argparse.Namespace` stays at the CLI boundary in
-install.py; only `Namespace -> UnresolvedConfig` crosses it.
-"""
-
 import re
 import tomllib
 from dataclasses import dataclass
@@ -25,20 +15,15 @@ DEFAULT_AGENTMASTER_HOME = Path.home() / '.agentmaster'
 
 
 class Target(StrEnum):
-    """An install destination, or `ALL` for every supported destination."""
-
     CLAUDE = 'claude'
     COPILOT = 'copilot'
     ALL = 'all'
 
     def expand(self) -> tuple[Target, ...]:
-        """Return the concrete targets this value covers."""
         return (Target.CLAUDE, Target.COPILOT) if self is Target.ALL else (self,)
 
 
 class Role(StrEnum):
-    """An Agentmaster runtime role, independently configurable (SPEC.md §11.1)."""
-
     COORDINATOR = 'coordinator'
     ORCHESTRATOR = 'orchestrator'
     IMPLEMENTER = 'implementer'
@@ -46,8 +31,6 @@ class Role(StrEnum):
 
 
 class Effort(StrEnum):
-    """A supported reasoning-effort level for a Claude role."""
-
     LOW = 'low'
     MEDIUM = 'medium'
     HIGH = 'high'
@@ -55,8 +38,6 @@ class Effort(StrEnum):
     MAX = 'max'
 
 
-# Recommended defaults (SPEC.md §11.1). Copilot has no orchestrator/reviewer
-# flags and never gets an effort field.
 DEFAULT_ROLE_MODEL: Mapping[tuple[Target, Role], str] = {
     (Target.CLAUDE, Role.COORDINATOR): 'opus',
     (Target.CLAUDE, Role.ORCHESTRATOR): 'sonnet',
@@ -79,8 +60,6 @@ ROLE_RATIONALE: Mapping[Role, str] = {
 
 
 class DeliveryMode(StrEnum):
-    """How Agentmaster is permitted to publish a run's changes."""
-
     LOCAL = 'local'
     COMMIT = 'commit'
     PULL_REQUEST = 'pull-request'
@@ -88,29 +67,14 @@ class DeliveryMode(StrEnum):
 
 
 class RawCapture(StrEnum):
-    """Raw request/response and command-output capture policy (§16.2)."""
-
     FAILURES = 'failures'
 
 
 class RedactionMode(StrEnum):
-    """Redaction policy applied before any raw payload is persisted (§16.2)."""
-
     STANDARD = 'standard'
 
 
 class ConfigError(ValueError):
-    """A resolved or `--config`-loaded value is invalid.
-
-    Parameters
-    ----------
-    key_path
-        Dotted CLI or TOML location (e.g. ``orchestration.delivery_mode``) so
-        the error names exactly which field to fix.
-    message
-        Human-readable reason.
-    """
-
     def __init__(self, key_path: str, message: str) -> None:
         self.key_path = key_path
         super().__init__(f'{key_path}: {message}')
@@ -118,13 +82,10 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class RoleOverride:
-    """A resolved model — and, where the role supports it, effort — for one role."""
-
     model: str
     effort: Effort | None = None
 
     def frontmatter_fields(self) -> dict[str, str]:
-        """Allow-listed frontmatter overrides for `installer.frontmatter`."""
         fields = {'model': self.model}
         if self.effort is not None:
             fields['effort'] = self.effort.value
@@ -133,8 +94,6 @@ class RoleOverride:
 
 @dataclass(frozen=True, slots=True)
 class UnresolvedConfig:
-    """Raw installer inputs, one field per CLI flag, before precedence applies."""
-
     target: Target
     dry_run: bool = False
     no_input: bool = False
@@ -161,8 +120,6 @@ class UnresolvedConfig:
 
 @dataclass(frozen=True, slots=True)
 class ClaudeRoleConfig:
-    """Resolved Claude role configuration for one install."""
-
     coordinator_model: str
     orchestrator: RoleOverride
     implementer: RoleOverride
@@ -171,16 +128,12 @@ class ClaudeRoleConfig:
 
 @dataclass(frozen=True, slots=True)
 class CopilotRoleConfig:
-    """Resolved Copilot role configuration for one install."""
-
     coordinator_model: str
     implementer_model: str
 
 
 @dataclass(frozen=True, slots=True)
 class ResolvedConfig:
-    """Fully resolved installer configuration — no further precedence to apply."""
-
     targets: tuple[Target, ...]
     dry_run: bool
     no_input: bool
@@ -195,7 +148,6 @@ class ResolvedConfig:
     redaction: RedactionMode
 
     def summary_lines(self) -> list[str]:
-        """Render the resolved plan for display before any write happens."""
         ledger_display = str(self.ledger_path) if self.ledger_enabled else 'disabled'
         artifacts_display = str(self.artifact_path) if self.ledger_enabled else 'disabled'
         return [
@@ -221,17 +173,6 @@ def _require_enum[E: StrEnum](enum_cls: type[E], key_path: str, value: object) -
 
 
 def load_config_document(path: PathLike[str] | str) -> Mapping[str, object]:
-    """Parse a `--config` TOML file and validate its schema version.
-
-    Only the fields this installer version resolves are validated here;
-    unrecognized tables/keys are left untouched for forward compatibility
-    (§12: "Unknown keys must survive a read/modify/write").
-
-    Raises
-    ------
-    ConfigError
-        If the file is not valid TOML or `schema_version` is missing/invalid.
-    """
     raw_path = Path(path)
     try:
         document = tomllib.loads(raw_path.read_text(encoding='utf-8'))
@@ -269,11 +210,6 @@ def _document_ledger_field[E: StrEnum](
 def resolve(
     unresolved: UnresolvedConfig, document: Mapping[str, object] | None = None
 ) -> ResolvedConfig:
-    """Apply CLI > `--config` TOML > built-in default precedence.
-
-    `document` is the already-loaded and schema-validated TOML mapping (see
-    `load_config_document`), or `None` when `--config` was not given.
-    """
     document = document or {}
     agentmaster_home = unresolved.agentmaster_home or DEFAULT_AGENTMASTER_HOME
     delivery_mode = (
@@ -305,14 +241,6 @@ def resolve(
 
 
 def validate_ledger_flags(unresolved: UnresolvedConfig) -> None:
-    """Reject `--no-ledger` combined with `--ledger-path` (SPEC.md §11).
-
-    Raises
-    ------
-    ConfigError
-        Both flags were given; disabling the ledger and pointing it
-        somewhere are mutually exclusive.
-    """
     if unresolved.no_ledger and unresolved.ledger_path is not None:
         raise ConfigError('--no-ledger', 'cannot be combined with --ledger-path')
 
@@ -330,14 +258,6 @@ _COPILOT_TARGET_FIELDS = ('copilot_model', 'copilot_implementer_model')
 
 
 def validate_role_flags(unresolved: UnresolvedConfig) -> None:
-    """Reject a role/target-specific flag when its target isn't selected.
-
-    Raises
-    ------
-    ConfigError
-        A `--claude-*` flag was given without `claude` selected, or a
-        `--copilot-*` flag was given without `copilot` selected.
-    """
     targets = set(unresolved.target.expand())
     if Target.CLAUDE not in targets:
         _reject_present(unresolved, _CLAUDE_TARGET_FIELDS, 'claude')
@@ -355,15 +275,6 @@ def _reject_present(
 
 
 def validate_auto_compact_flags(unresolved: UnresolvedConfig) -> None:
-    """Reject an invalid percentage, both flags together, or a non-Claude target.
-
-    Raises
-    ------
-    ConfigError
-        `--auto-compact-percent` is outside 1..100, `--auto-compact-percent`
-        and `--clear-auto-compact-override` were both given, or either was
-        given without `claude` selected (SPEC.md §15).
-    """
     percent = unresolved.auto_compact_percent
     if percent is not None:
         if not 1 <= percent <= 100:
@@ -386,8 +297,6 @@ def validate_auto_compact_flags(unresolved: UnresolvedConfig) -> None:
 
 
 class AutoCompactOverride(NamedTuple):
-    """Resolved Claude auto-compact percent/clear intent for one install."""
-
     percent: int | None
     clear: bool
 
@@ -400,12 +309,6 @@ def resolve_auto_compact(
     is_tty: bool,
     prompt: Callable[[], tuple[int | None, bool]] | None = None,
 ) -> AutoCompactOverride:
-    """Resolve the Claude auto-compact percent/clear intent for one install.
-
-    An explicit flag always wins; otherwise an interactive prompt runs when
-    available; otherwise noninteractive install preserves current behavior
-    (`None, False`) per SPEC.md §15.
-    """
     if explicit_percent is not None or explicit_clear:
         return AutoCompactOverride(explicit_percent, explicit_clear)
     if is_tty and not no_input and prompt is not None:
@@ -414,14 +317,6 @@ def resolve_auto_compact(
 
 
 class RolePromptContext(NamedTuple):
-    """Prompting collaborators shared by every `resolve_role()` call in one install.
-
-    `is_tty` and `prompt` are explicit collaborators (not `sys.stdin.isatty()`
-    or `input()` called internally) so tests drive both branches without a
-    real terminal. `no_input` and a non-interactive `is_tty=False` both
-    suppress prompting.
-    """
-
     no_input: bool
     is_tty: bool
     prompt: (
@@ -437,9 +332,6 @@ def resolve_role(
     explicit_effort: Effort | None,
     context: RolePromptContext,
 ) -> RoleOverride:
-    """Resolve one role's model (and effort, where supported): explicit flag,
-    else prompt, else the recommended default (SPEC.md §11.1).
-    """
     default_model = DEFAULT_ROLE_MODEL[(target, role)]
     default_effort = DEFAULT_ROLE_EFFORT.get(role)
     if explicit_model or explicit_effort:

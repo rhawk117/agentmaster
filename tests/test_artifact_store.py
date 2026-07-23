@@ -1,5 +1,3 @@
-"""Tests for content-addressed SHA-256 artifact storage (SPEC.md §16.1, §23 MT13)."""
-
 import pytest
 
 from ledger.artifact_store import ArtifactStore, content_address

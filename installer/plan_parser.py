@@ -1,11 +1,3 @@
-"""Parse `Uses:` capability declarations out of plan task blocks.
-
-Plans are markdown; each task is a `**T<id> — <title>** implementer (sonnet)`
-header (see `scripts/plan-structure-lint.sh`) followed by free-text lines,
-among them `Uses:` and (conventionally) `Scope:`. Only the `Uses:` value is
-checked here — everything else in a task block stays free prose.
-"""
-
 import re
 from dataclasses import dataclass
 
@@ -17,8 +9,6 @@ _TASK_HEADER = re.compile(
 _SCOPE_LINE = re.compile(r'^Scope:\s*(?P<value>.+)$', re.MULTILINE)
 _USES_LINE = re.compile(r'^Uses:\s*(?P<value>.+)$', re.MULTILINE)
 
-# Repo-local skills whose directories double as valid bare `Uses:` names —
-# these are agentmaster's own coordinators, not registered capabilities.
 _REPO_SKILL_NAMES = frozenset({
     'agentmaster-plan',
     'agentmaster-execute',
@@ -29,8 +19,6 @@ _REPO_SKILL_NAMES = frozenset({
 
 @dataclass(frozen=True, slots=True)
 class PlanTask:
-    """One parsed task block from a plan document."""
-
     task_id: str
     title: str
     uses: tuple[str, ...]
@@ -39,8 +27,6 @@ class PlanTask:
 
 
 class UnknownCapabilityError(ValueError):
-    """A `Uses:` line names a bare capability outside the known registry."""
-
     def __init__(self, *, task_id: str, capability: str) -> None:
         self.task_id = task_id
         self.capability = capability
@@ -51,18 +37,6 @@ class UnknownCapabilityError(ValueError):
 
 
 def parse_tasks(plan_text: str) -> list[PlanTask]:
-    """Split a plan document into its task blocks.
-
-    Parameters
-    ----------
-    plan_text : str
-        The full plan document (or just its `## Tasks` section).
-
-    Returns
-    -------
-    list[PlanTask]
-        One entry per `**T<id> — <title>**` header found, in document order.
-    """
     headers = list(_TASK_HEADER.finditer(plan_text))
     tasks: list[PlanTask] = []
     for index, match in enumerate(headers):
@@ -90,27 +64,12 @@ def parse_tasks(plan_text: str) -> list[PlanTask]:
 
 
 def _is_known(token: str) -> bool:
-    # A colon marks a namespaced external reference (e.g. superpowers:x),
-    # which this repo cannot verify and therefore never flags as unknown.
     if token == 'none' or ':' in token:
         return True
     return token in CAPABILITIES or token in _REPO_SKILL_NAMES
 
 
 def validate_uses(tasks: list[PlanTask]) -> list[str]:
-    """Return one error string per unknown bare capability token.
-
-    Parameters
-    ----------
-    tasks : list[PlanTask]
-        Parsed tasks, as returned by :func:`parse_tasks`.
-
-    Returns
-    -------
-    list[str]
-        Empty when every `Uses:` token is `none`, a registered capability,
-        a repo-local skill name, or a namespaced external reference.
-    """
     return [
         str(UnknownCapabilityError(task_id=task.task_id, capability=token))
         for task in tasks

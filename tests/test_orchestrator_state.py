@@ -1,5 +1,3 @@
-"""Tests for the durable RUN/TASK execution state machine (SPEC.md §9.1, §23 M19)."""
-
 import uuid
 
 import pytest
@@ -48,9 +46,6 @@ def _seed_agent_session(connection, run_id: str, agent_session_id: str) -> None:
         (agent_session_id, run_id, _now()),
     )
     connection.commit()
-
-
-# --- RUN transitions ---------------------------------------------------------
 
 
 @pytest.mark.sqlite
@@ -179,9 +174,6 @@ def test_run_completion_hooks_fire_when_a_run_reaches_complete(ledger_connection
     assert fired == [seed.run_id]
 
 
-# --- TASK transitions ---------------------------------------------------------
-
-
 @pytest.mark.sqlite
 def test_transition_task_moves_through_a_legal_path(ledger_connection):
     seed = seed_project_run_task(ledger_connection)
@@ -202,7 +194,7 @@ def test_transition_task_moves_through_a_legal_path(ledger_connection):
         ('task-1',),
     ).fetchone()
     assert row[0] == 'complete'
-    assert row[1] is None  # lease released once the task left 'running'
+    assert row[1] is None
     assert row[2] == _now()
     assert row[3] == _now()
     transitions = ledger_connection.execute(

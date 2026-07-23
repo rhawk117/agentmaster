@@ -1,5 +1,3 @@
-"""Tests for the memory/feedback schema (SPEC.md §23 Microtask 14 commit 1, §17.2)."""
-
 import pytest
 
 from ledger.connection import connect

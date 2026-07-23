@@ -1,17 +1,8 @@
-"""The `agentmaster` CLI's own registered-command table (SPEC.md §17.1, §19).
-
-A structured, queryable registry of this CLI's command groups and verbs.
-Microtask 19 seeds `kind='command'` ENTRYPOINT rows (SPEC.md §17.1) from
-`COMMAND_REGISTRY`; this module only defines the registry itself.
-"""
-
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
 class CommandEntry:
-    """One registered `agentmaster` command: its group, verb, and description."""
-
     group: str
     name: str
     description: str
@@ -135,7 +126,6 @@ COMMAND_REGISTRY: tuple[CommandEntry, ...] = (
 
 
 def find_command(*, group: str, name: str) -> CommandEntry | None:
-    """Return the registered command matching `group`/`name`, or `None`."""
     for entry in COMMAND_REGISTRY:
         if entry.group == group and entry.name == name:
             return entry

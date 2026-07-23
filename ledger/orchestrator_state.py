@@ -1,27 +1,3 @@
-"""Durable RUN/TASK execution state machine (SPEC.md §9.1, §23 Microtask 19).
-
-Replaces implicit, unvalidated `UPDATE ... SET state = ...` calls with legality-
-checked transitions that append an immutable `RUN_TRANSITION`/`TASK_TRANSITION`
-row (SPEC.md §9: "record every state transition and its evidence"). A
-same-state request is a no-op rather than an error or a duplicate event, so
-dispatch and interruption recovery (`ledger.orchestrator_recovery`) can call
-these functions without first checking current state (§23 M19: "make dispatch
-and transition operations idempotent").
-
-`RUN_TRANSITIONS` is exactly SPEC.md §9.1's diagram, plus `Failed`/`Cancelled`
-reachable from every non-terminal state (execution failure or user
-cancellation can occur at any point) and `Blocked` only where the diagram
-draws it (Preflight). `TASK_TRANSITIONS` has no dedicated spec diagram — it is
-a bounded, conservative machine over TASK's existing CHECK-constrained state
-set (`ready`, `running`, `blocked`, `failed`, `review-required`, `complete`).
-
-`RUN_COMPLETION_HOOKS` is the seam SPEC.md §9.1 describes for the
-Merged->RetrospectivePending->Complete tail ("Feedback capture attaches at
-the RetrospectivePending->Complete transition"): a later microtask appends its
-feedback-capture callback here. This module fires whatever hooks are
-registered but implements none itself.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -57,13 +33,6 @@ RUN_TRANSITIONS: dict[str, tuple[str, ...]] = {
     'Cancelled': (),
 }
 
-# SPEC.md §20.3: "A stop hook blocks successful execution termination while
-# the state is REVIEW_REQUIRED, REVIEWING, FIXES_REQUIRED, MERGE_PENDING, or
-# RETROSPECTIVE_PENDING." `hooks/execute_stop.py` cannot import this module
-# (hook processes run standalone, copied without the `ledger` package), so it
-# duplicates this exact set as a literal -- this constant is that set's
-# source of truth for the orchestrator-side callers (`ledger.review_gate`)
-# that can import it directly.
 BLOCKING_COMPLETION_STATES: frozenset[str] = frozenset({
     'ReviewRequired',
     'Reviewing',
@@ -83,27 +52,20 @@ TASK_TRANSITIONS: dict[str, tuple[str, ...]] = {
     'complete': (),
 }
 
-# SPEC.md §9.1: feedback capture attaches here; Microtask 26 appends its
-# hook, this module never populates it.
 RUN_COMPLETION_HOOKS: list[Callable[[sqlite3.Connection, str], None]] = []
 
 
-class RunNotFoundError(ValueError):
-    """No RUN row exists for the requested id."""
+class RunNotFoundError(ValueError): ...
 
 
-class TaskNotFoundError(ValueError):
-    """No TASK row exists for the requested id."""
+class TaskNotFoundError(ValueError): ...
 
 
-class IllegalTransitionError(ValueError):
-    """The requested RUN/TASK state transition is not permitted by SPEC.md §9.1."""
+class IllegalTransitionError(ValueError): ...
 
 
 @dataclass(frozen=True, slots=True)
 class RunTransitionInput:
-    """The clock, minting, and reason a `transition_run` call needs."""
-
     now: str
     id_factory: Callable[[], str]
     reason: str | None = None
@@ -111,8 +73,6 @@ class RunTransitionInput:
 
 @dataclass(frozen=True, slots=True)
 class TaskTransitionInput:
-    """The clock, minting, reason, and lease a `transition_task` call needs."""
-
     now: str
     id_factory: Callable[[], str]
     reason: str | None = None
@@ -139,19 +99,6 @@ def transition_run(
     to_state: str,
     transition: RunTransitionInput,
 ) -> None:
-    """Transition RUN `run_id` to `to_state`, appending a RUN_TRANSITION row.
-
-    Requesting the current state again is a no-op. Reaching `to_state ==
-    'Complete'` runs every hook in `RUN_COMPLETION_HOOKS` after the
-    transition commits.
-
-    Raises
-    ------
-    RunNotFoundError
-        No RUN row exists for `run_id`.
-    IllegalTransitionError
-        `current -> to_state` is not in `RUN_TRANSITIONS[current]`.
-    """
     current = _current_run_state(connection, run_id)
     if current == to_state:
         return
@@ -188,20 +135,6 @@ def transition_task(
     to_state: str,
     transition: TaskTransitionInput,
 ) -> None:
-    """Transition TASK `task_id` to `to_state`, appending a TASK_TRANSITION row.
-
-    Requesting the current state again is a no-op. Entering `'running'` sets
-    `started_at` (if unset) and the running lease (`lease_agent_session_id`);
-    leaving `'running'` releases that lease. Entering `'complete'` or
-    `'failed'` sets `ended_at`.
-
-    Raises
-    ------
-    TaskNotFoundError
-        No TASK row exists for `task_id`.
-    IllegalTransitionError
-        `current -> to_state` is not in `TASK_TRANSITIONS[current]`.
-    """
     current = _current_task_state(connection, task_id)
     if current == to_state:
         return

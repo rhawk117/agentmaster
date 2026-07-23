@@ -1,5 +1,3 @@
-"""Tests for the GitHub Copilot install target."""
-
 import json
 import shlex
 from pathlib import Path
@@ -192,7 +190,7 @@ def test_fake_manifest_installs_only_declared(tmp_path: Path, make_manifest) -> 
     )
 
     installed_scout = (home / 'agents' / 'scout.agent.md').read_text(encoding='utf-8')
-    assert 'shared body' in installed_scout  # rendered from the fake root, not the repo
+    assert 'shared body' in installed_scout
     assert (home / 'agents' / 'co.agent.md').is_file()
     assert sorted(p.name for p in (home / 'agents').iterdir()) == [
         'co.agent.md',

@@ -1,5 +1,3 @@
-"""Tests for the versioned owned-state store (SPEC.md §14)."""
-
 import pytest
 
 from installer.managed_state import OwnedState, OwnedStateError, parse, render

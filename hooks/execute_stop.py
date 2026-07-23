@@ -1,24 +1,3 @@
-"""Stop -> block execute from ending while the review/merge gate is incomplete.
-
-SPEC.md §20.3: "A stop hook blocks successful execution termination while the
-state is REVIEW_REQUIRED, REVIEWING, FIXES_REQUIRED, MERGE_PENDING, or
-RETROSPECTIVE_PENDING for the selected delivery mode... [and] must not
-recursively relaunch after a configured retry ceiling." Hook processes run
-standalone, copied without the `ledger` package (see hooks/hooklib.py's
-`spool_event`), so this reads the ledger sqlite file directly with the
-stdlib `sqlite3` module rather than importing `ledger.*`; on any missing
-descriptor, disabled ledger, missing marker, missing ledger file, or read
-error it fails open (exits 0) rather than ever blocking a stop it cannot
-actually verify. The ledger path comes from the installed runtime descriptor
-(`hooklib.load_runtime_descriptor`, resolved relative to this hook's own
-installed location), never from a workspace-relative `config.toml` -- that
-path need not exist in a real installed layout.
-
-`BLOCKING_STATES` duplicates `ledger.orchestrator_state.
-BLOCKING_COMPLETION_STATES` (the source of truth) for the same reason;
-`tests/test_execute_stop_hook.py` asserts the two stay in lockstep.
-"""
-
 import contextlib
 import json
 import sqlite3
@@ -41,9 +20,6 @@ MAX_STOP_RETRIES = 3
 
 
 def _ledger_path() -> Path | None:
-    # Broad by design (hooklib.py's own read_payload/spool_event convention):
-    # any lookup failure or disabled ledger means "can't verify", which fails
-    # open, not closed.
     with contextlib.suppress(Exception):
         descriptor = hooklib.load_runtime_descriptor()
         if descriptor is None or not descriptor.ledger_enabled:
@@ -89,13 +65,6 @@ def _retry_count(payload: dict) -> int:
 
 
 def _record_retries_exhausted(payload: dict, *, run_id: str, state: str) -> None:
-    """Make the retry ceiling observable via `hook-debug.jsonl`.
-
-    The hook only ever opens the ledger read-only (`_run_state`'s `mode=ro`
-    URI), so it cannot append a RECOVERY_EVENT row itself; this mirrors
-    `hooklib.auto_drain`'s existing debug-only observability convention
-    instead of granting a standalone, untrusted process ledger write access.
-    """
     with contextlib.suppress(Exception):
         am = hooklib.agentmaster_dir(payload)
         with (am / 'hook-debug.jsonl').open('a') as f:
@@ -125,9 +94,6 @@ def main() -> int:
 
     retries = _retry_count(payload) + 1
     if retries > MAX_STOP_RETRIES:
-        # Idempotent, non-recursive: stop retrying after the ceiling and let
-        # the session end, surfacing the gate as still open rather than
-        # relaunching indefinitely.
         _record_retries_exhausted(payload, run_id=run_id, state=state)
         sys.stderr.write(
             f'agentmaster execute stop hook: run {run_id} is still {state} after '

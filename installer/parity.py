@@ -1,13 +1,3 @@
-"""Parity validation between the canonical sources and both platforms.
-
-`validate` re-derives everything that is generated or synced and reports any
-undeclared difference: missing canonical sources (completeness), committed
-worker files that differ from their rendered form (drift), review-criteria
-blocks out of sync with `criteria/review-criteria.md`, and stray worker files
-no manifest entry declares. Coordinator prose outside the criteria markers is
-a declared platform difference and is not compared.
-"""
-
 from pathlib import Path
 
 from installer.manifest import MANIFEST, Manifest
@@ -51,7 +41,7 @@ def _drift(root: Path, manifest: Manifest) -> list[str]:
     for name in manifest.workers:
         source = root / 'shared' / 'agents' / f'{name}.md'
         if not source.is_file():
-            continue  # already reported by completeness
+            continue
         for platform in ('claude', 'copilot'):
             path = generated_path(name, platform, root)
             rendered = render_worker(name, platform, manifest, root)
@@ -96,10 +86,6 @@ def _writing_skills_criteria_targets(root: Path, manifest: Manifest) -> list[Pat
     return targets
 
 
-# Each canon file is injected verbatim between its criteria markers in every
-# target its targets-function names. Adding a rubric means adding one
-# (canon path, targets function, start marker, end marker) tuple here — the
-# comparison logic below is unchanged per tuple.
 _CRITERIA_CANONS = (
     (
         Path('criteria') / 'review-criteria.md',
@@ -174,7 +160,6 @@ def _strays(root: Path, manifest: Manifest) -> list[str]:
 
 
 def validate(root: Path, manifest: Manifest = MANIFEST) -> list[str]:
-    """Return all parity findings for the tree at `root` (empty list = pass)."""
     return (
         _completeness(root, manifest)
         + _drift(root, manifest)

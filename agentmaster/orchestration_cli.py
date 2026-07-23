@@ -1,15 +1,3 @@
-"""Thin JSON wrappers over the RUN/TASK orchestration surface (SPEC.md §9, §9.1).
-
-`agentmaster/cli.py` parses arguments and prints JSON only; every legality
-check and state mutation lives in `ledger.orchestrator_state`,
-`ledger.orchestrator_preflight`, and `ledger.orchestrator_recovery` (already
-directly testable without a subprocess). This module adds the one piece
-those don't provide: reusing an existing open RUN for a user session
-(RUN-reconciliation contract) and writing that RUN id into the session's
-`.run_id` marker so `ledger.ingestion.resolve_run`'s `.run_id`-preferring
-lookup and this CLI's own dispatch calls agree on exactly one RUN.
-"""
-
 import contextlib
 import json
 import os
@@ -65,32 +53,16 @@ def _report_not_found(error: RunNotFoundError | TaskNotFoundError) -> int:
 
 
 def _report_integrity_error(error: sqlite3.IntegrityError) -> int:
-    """A referenced row (e.g. an agent-session lease) does not exist -- fail
-    closed with a JSON error rather than letting the traceback surface.
-    """
     _emit({'error': str(error)})
     return 1
 
 
 def _report_ledger_error(error: sqlite3.Error | BusyRetriesExhaustedError) -> int:
-    """A genuine transition write failed (BUSY retries exhausted, or another
-    `sqlite3.Error`) -- fail closed with a JSON error rather than a traceback.
-    """
     _emit({'error': str(error)})
     return 1
 
 
 def _guard_transition(operation: Callable[[], int]) -> int:
-    """Run a RUN/TASK transition `operation`, mapping ledger errors to a
-    closed JSON error instead of letting them surface as a raw traceback.
-
-    Shared by every `cmd_*` transition/dispatch command below (previously a
-    copy-pasted 3-branch except cascade in each). `sqlite3.IntegrityError` is
-    caught ahead of the broader `sqlite3.Error` it subclasses. The
-    `sqlite3.Error`/`BusyRetriesExhaustedError` branch only ever reports a
-    genuine transition failure: `_retire_run_id_marker`'s best-effort cleanup
-    already swallows its own errors internally and never reaches here.
-    """
     try:
         return operation()
     except (RunNotFoundError, TaskNotFoundError) as error:
@@ -106,12 +78,6 @@ def _guard_transition(operation: Callable[[], int]) -> int:
 def _write_run_id_marker(
     *, harness_session_id: str, project_root: str, run_id: str
 ) -> None:
-    """Atomically persist `run_id` to this session's `.run_id` marker.
-
-    Write-to-temp-then-rename, matching `hooklib.spool_event`'s and
-    `installer.actions._write_atomic`'s pattern -- a reader never observes a
-    partially written marker.
-    """
     sdir = session_dir({'session_id': harness_session_id, 'cwd': project_root})
     descriptor, tmp_name = tempfile.mkstemp(dir=sdir, suffix='.tmp')
     tmp_path = Path(tmp_name)
@@ -127,7 +93,6 @@ def _write_run_id_marker(
 def _session_and_root_for_run(
     connection: sqlite3.Connection, run_id: str
 ) -> tuple[str, str] | None:
-    """Return `(harness_session_id, canonical_root)` for `run_id`, or `None`."""
     row = connection.execute(
         'SELECT s.harness_session_id, p.canonical_root '
         'FROM RUN r JOIN USER_SESSION s ON s.user_session_id = r.user_session_id '
@@ -140,14 +105,6 @@ def _session_and_root_for_run(
 def _retire_run_id_marker(
     connection: sqlite3.Connection, run_id: str, to_state: str
 ) -> None:
-    """Remove this run's `.run_id` marker once it reaches a terminal state.
-
-    A later session (e.g. the Stop hook, `hooks/execute_stop.py`) must not
-    keep blocking on a run that has already finished, failed, or been
-    cancelled. Only unlinks the marker when its content still names this
-    run -- a marker already overwritten by a newer run must never be
-    retired by a stale caller finishing this one late.
-    """
     if to_state not in RUN_TERMINAL_STATES:
         return
     with contextlib.suppress(sqlite3.Error, OSError):
@@ -163,10 +120,6 @@ def _retire_run_id_marker(
 
 @dataclass(frozen=True, slots=True)
 class _RunStartInput:
-    """Bundles a `_reuse_or_start_run` call's arguments under the project's
-    max-arguments lint (PLR0913), mirroring `ledger.ingestion._RunResolutionContext`.
-    """
-
     project_id: str
     user_session_id: str
     delivery_mode: str
@@ -179,13 +132,6 @@ class _RunStartInput:
 def _reuse_or_start_run(
     connection: sqlite3.Connection, start: _RunStartInput
 ) -> tuple[str, bool]:
-    """Reuse this session's open RUN, else insert a new one in `'Planned'`.
-
-    Uses the exact same "no `ended_at`" lookup `ledger.ingestion.resolve_run`
-    uses, so whichever of `run start` or a telemetry drain runs first, the
-    other reuses the same RUN rather than inserting a second one
-    (RUN-reconciliation contract).
-    """
 
     def _op(conn: sqlite3.Connection) -> tuple[str, bool]:
         row = conn.execute(
@@ -317,13 +263,6 @@ def cmd_run_recover(args: argparse.Namespace) -> int:
 
 
 def _parse_depends_on(raw: str) -> tuple[str, str]:
-    """Split a `--depends-on` value into `(depends_on_task_id, kind)`.
-
-    Task ids may themselves contain colons (the default auto-generated form
-    is `task:{run_id}:{sequence_no}`), so a plain `:` cannot delimit the
-    optional dependency kind. `=` never appears in a task id, so it is used
-    instead; `raw` with no `=` is the whole task id with the default kind.
-    """
     task_id, _, kind = raw.partition('=')
     return task_id, kind or 'blocks'
 
@@ -351,11 +290,6 @@ def cmd_task_register(args: argparse.Namespace) -> int:
         )
         for raw in args.depends_on:
             depends_on_task_id, kind = _parse_depends_on(raw)
-            # `INSERT OR IGNORE` also silently swallows a foreign-key
-            # violation (SQLite applies the statement's own conflict
-            # resolution -- not ABORT -- to FK failures too), so a dependency
-            # on a task that does not exist must be rejected here instead of
-            # being dropped without an error.
             referenced = conn.execute(
                 'SELECT 1 FROM TASK WHERE id = ? AND run_id = ?',
                 (depends_on_task_id, args.run_id),

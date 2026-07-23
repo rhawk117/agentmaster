@@ -1,5 +1,3 @@
-"""Ledger health record: the journaling decision `doctor` reports (SPEC.md §16.1)."""
-
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -7,8 +5,6 @@ from datetime import UTC, datetime
 
 @dataclass(frozen=True, slots=True)
 class HealthRecord:
-    """The last recorded journaling decision for a ledger database."""
-
     journal_mode: str
     reason: str
     sqlite_version: str
@@ -18,7 +14,6 @@ class HealthRecord:
 def record_health(
     connection: sqlite3.Connection, *, journal_mode: str, reason: str
 ) -> None:
-    """Upsert the singleton `ledger_health` row with the current journaling decision."""
     connection.execute(
         'INSERT INTO ledger_health '
         '(id, journal_mode, journal_mode_reason, sqlite_version, checked_at) '
@@ -34,7 +29,6 @@ def record_health(
 
 
 def read_health(connection: sqlite3.Connection) -> HealthRecord | None:
-    """Return the recorded journaling decision, or `None` if never recorded."""
     row = connection.execute(
         'SELECT journal_mode, journal_mode_reason, sqlite_version, checked_at '
         'FROM ledger_health WHERE id = 1'

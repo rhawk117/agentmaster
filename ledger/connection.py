@@ -1,12 +1,3 @@
-"""Standard-library SQLite connection factory (SPEC.md §16.1).
-
-Opens one connection per call — callers own their own thread/process
-boundary — with foreign keys enabled and a finite busy timeout. WAL is
-selected only when the runtime SQLite has the WAL-reset fix and the ledger
-lives on a local filesystem; otherwise falls back to DELETE journaling and
-records the reason so `ledger_health` (§16.1) can report it later.
-"""
-
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,8 +18,6 @@ _NETWORK_FILESYSTEM_TYPES = frozenset({
 
 @dataclass(frozen=True, slots=True)
 class JournalDecision:
-    """The selected SQLite journal mode and the reason it was chosen."""
-
     mode: str
     reason: str
 
@@ -40,7 +29,6 @@ def _runtime_sqlite_version() -> tuple[int, int, int]:
 
 
 def _mount_filesystem_type(path: Path) -> str | None:
-    """Best-effort lookup of the filesystem type backing `path` (Linux `/proc/mounts`)."""
     mounts_file = Path('/proc/mounts')
     if not mounts_file.is_file():
         return None
@@ -64,7 +52,6 @@ def _is_network_filesystem(path: Path) -> bool:
 
 
 def select_journal_mode(ledger_path: Path) -> JournalDecision:
-    """Choose WAL when the runtime and filesystem are safe, else DELETE with a reason."""
     version = _runtime_sqlite_version()
     if version < MIN_WAL_SAFE_VERSION:
         required = '.'.join(str(part) for part in MIN_WAL_SAFE_VERSION)
@@ -83,26 +70,12 @@ def select_journal_mode(ledger_path: Path) -> JournalDecision:
 
 
 def connect_read_only(ledger_path: Path) -> sqlite3.Connection:
-    """Open a query-only connection to an existing ledger (SPEC.md §18).
-
-    The retrospective capability "connects read-only to allow-listed views
-    using a SQLite URI such as file:...?...mode=ro and enables PRAGMA
-    query_only = ON. It must not have a general write connection" (§18): a
-    `mode=ro` URI keeps SQLite itself from ever opening the file for writing,
-    and `PRAGMA query_only = ON` is a second, connection-local backstop.
-    """
     connection = sqlite3.connect(f'file:{ledger_path}?mode=ro', uri=True)
     connection.execute('PRAGMA query_only = ON')
     return connection
 
 
 def connect(ledger_path: Path) -> sqlite3.Connection:
-    """Open a ledger connection with foreign keys, busy timeout, and journal mode set.
-
-    Closes the underlying connection before propagating any error raised
-    while applying these settings, so a failed setup never leaks an
-    unclosed SQLite connection.
-    """
     connection = sqlite3.connect(ledger_path, timeout=BUSY_TIMEOUT_MS / 1000)
     try:
         connection.execute('PRAGMA foreign_keys = ON')

@@ -1,12 +1,3 @@
-"""End-to-end memory promotion/demotion tests (SPEC.md §17.4, §18, §23 M23).
-
-Exercises the full path a memory travels: a retrospective proposes a
-project-scoped Candidate, an independent session validates and activates it,
-and only independent cross-project evidence unlocks global promotion --
-never the retrospective or the proposing session itself (SPEC.md §1/§5: no
-silent self-rewriting).
-"""
-
 from typing import TYPE_CHECKING
 
 import pytest
@@ -170,7 +161,6 @@ def test_full_promotion_path_from_candidate_to_global_scope(ledger_connection):
         created_at=_CREATED_AT,
     )
 
-    # Validated and activated at project scope, by a different session.
     validate_memory(
         ledger_connection,
         memory_id,
@@ -180,7 +170,6 @@ def test_full_promotion_path_from_candidate_to_global_scope(ledger_connection):
     )
     activate_memory(ledger_connection, memory_id, updated_at=_CREATED_AT)
 
-    # A second project's independent evidence unlocks global promotion.
     _seed_second_project_run(ledger_connection, project_id='project-2', run_id='run-2')
     _seed_evidence(
         ledger_connection,

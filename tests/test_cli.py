@@ -1,10 +1,3 @@
-"""CLI subprocess coverage for install.py.
-
-Exercises the installer through a real subprocess so exit codes, argparse
-error messages, and stdout/stderr formatting are covered end to end. Parity
-tests (generated-file/source equivalence) live in tests/test_parity.py.
-"""
-
 import json
 
 import pytest
@@ -163,7 +156,6 @@ def test_cli_install_auto_compact_percent_writes_env_override(
 
 @pytest.mark.subprocess
 def test_cli_install_no_input_never_prompts(tmp_path, run_cli, repo_root):
-    """--no-input on a would-be-interactive run must not block on stdin."""
     result = run_cli(
         ['install', '--target', 'claude', '--dry-run', '--no-input'],
         cwd=repo_root,
@@ -289,12 +281,6 @@ def test_cli_install_ledger_path_and_artifact_dir_are_resolved(
 def test_cli_install_runtime_descriptor_reflects_config_and_ledger_path_overrides(
     tmp_path, run_cli, repo_root
 ):
-    """Runtime descriptor contract (scenario 7): `--config` and
-    `--ledger-path` must propagate into the installed runtime descriptor's
-    `config_path`/`ledger_path` fields, not just into the resolved config on
-    disk. Red today because the installer emits no `runtime.json` at all
-    (T2 not yet implemented).
-    """
     claude_home = tmp_path / 'claude-home'
     agentmaster_home = tmp_path / 'agentmaster-home'
     config = tmp_path / 'custom-config.toml'

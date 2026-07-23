@@ -1,5 +1,3 @@
-"""Shared helpers for the agentmaster lifecycle hooks."""
-
 import contextlib
 import json
 import os
@@ -15,7 +13,6 @@ DEFAULT_INGEST_LIMIT = 50
 
 
 def read_payload() -> dict[str, Any]:
-    """Read the hook payload from stdin, returning {} on malformed input."""
     with contextlib.suppress(Exception):
         payload = json.loads(sys.stdin.read() or '{}')
         if isinstance(payload, dict):
@@ -24,25 +21,16 @@ def read_payload() -> dict[str, Any]:
 
 
 def workspace(payload: dict[str, Any]) -> Path:
-    """Resolve the workspace directory the hook operates on."""
     return Path(payload.get('cwd') or Path.cwd())
 
 
 def agentmaster_dir(payload: dict[str, Any]) -> Path:
-    """Return the .agentmaster directory, creating it if needed."""
     am = workspace(payload) / '.agentmaster'
     am.mkdir(exist_ok=True)
     return am
 
 
 def _sanitize_session_id(raw: str) -> str:
-    """Make a harness session id safe as a single path segment.
-
-    Path separators are replaced so the id can't escape the sessions/
-    directory; ids that are empty or made only of dots (which could
-    otherwise resolve to the current or a parent directory) fall back
-    to 'default'.
-    """
     sid = raw.strip().replace('/', '_').replace('\\', '_')
     if not sid or set(sid) == {'.'}:
         return 'default'
@@ -50,26 +38,16 @@ def _sanitize_session_id(raw: str) -> str:
 
 
 def session_id(payload: dict[str, Any]) -> str:
-    """Return the sanitized harness session id, or 'default' when absent."""
     return _sanitize_session_id(str(payload.get('session_id') or ''))
 
 
 def session_dir(payload: dict[str, Any]) -> Path:
-    """Return this session's workspace dir, creating it if needed.
-
-    Layout: .agentmaster/sessions/<harness-session-id>/ holds the
-    per-session .phase marker, .starts/ start timestamps, and
-    telemetry.md rows, so two sessions in one checkout never clobber
-    each other. Reads of .phase and .starts/ fall back to the legacy
-    .agentmaster/ root for markers written before this layout existed.
-    """
     sdir = agentmaster_dir(payload) / 'sessions' / session_id(payload)
     sdir.mkdir(parents=True, exist_ok=True)
     return sdir
 
 
 def debug_dump(payload: dict[str, Any]) -> None:
-    """Append the raw payload to hook-debug.jsonl when debugging is enabled."""
     if os.environ.get('AGENTMASTER_HOOK_DEBUG'):
         am = agentmaster_dir(payload)
         with (am / 'hook-debug.jsonl').open('a') as f:
@@ -77,11 +55,6 @@ def debug_dump(payload: dict[str, Any]) -> None:
 
 
 def current_phase(payload: dict[str, Any]) -> str:
-    """Return the active phase named in .phase, or '' when absent/unreadable.
-
-    Reads the session-scoped marker first, falling back to the legacy
-    .agentmaster/.phase for markers written before session scoping.
-    """
     for phase_file in (
         session_dir(payload) / '.phase',
         agentmaster_dir(payload) / '.phase',
@@ -102,7 +75,6 @@ def append_telemetry(
     duration_ms: str | int = '',
     model: str = '',
 ) -> None:
-    """Append a telemetry row for the given agent to the session's telemetry.md."""
     sdir = session_dir(payload)
     phase = current_phase(payload) or 'hook'
     with (sdir / 'telemetry.md').open('a') as f:
@@ -110,8 +82,6 @@ def append_telemetry(
 
 
 class CompactionContext(NamedTuple):
-    """Fields optionally present on a PreCompact hook payload."""
-
     agent_type: str
     trigger: str
     token_count: str
@@ -119,11 +89,6 @@ class CompactionContext(NamedTuple):
 
 
 def compaction_context(payload: dict[str, Any]) -> CompactionContext:
-    """Defensively extract compaction fields from a PreCompact payload.
-
-    Every field degrades to '' (agent_type to 'main') when the provider
-    omits it or the payload shape is unexpected; extraction never raises.
-    """
     with contextlib.suppress(Exception):
         return CompactionContext(
             agent_type=str(
@@ -139,24 +104,12 @@ def compaction_context(payload: dict[str, Any]) -> CompactionContext:
 
 
 def events_dir(payload: dict[str, Any]) -> Path:
-    """Return the pending-ledger-events spool directory, creating it if needed."""
     d = agentmaster_dir(payload) / 'events'
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def spool_event(payload: dict[str, Any], event: dict[str, Any]) -> None:
-    """Atomically write one normalized event for later bounded ledger ingestion.
-
-    Hook processes never import the `ledger` package: they run standalone,
-    copied without it (SPEC.md §19, §23 Microtask 17), so this writes a
-    small versioned JSON file instead of a database row; `ledger.ingestion`
-    turns it into typed tables in a later, bounded step. `harness_session_id`
-    is `session_id(payload)` so a spooled event lines up with the same
-    session identity `session_dir` already uses for telemetry.md/.starts.
-    Any failure (unwritable path, disk full) is swallowed so a hook never
-    blocks the harness on optional observability (SPEC.md §9, §16.1).
-    """
     with contextlib.suppress(Exception):
         events = events_dir(payload)
         record = {
@@ -176,8 +129,6 @@ def spool_event(payload: dict[str, Any], event: dict[str, Any]) -> None:
 
 
 class RuntimeDescriptor(NamedTuple):
-    """The installed Runtime descriptor contract fields, parsed from `runtime.json`."""
-
     config_path: Path
     launcher: Path
     ledger_path: Path | None
@@ -187,17 +138,6 @@ class RuntimeDescriptor(NamedTuple):
 
 
 def load_runtime_descriptor() -> RuntimeDescriptor | None:
-    """Load the installed `runtime.json` beside this hook, or `None` on any error.
-
-    `hooklib.py` is installed alongside every other hook file (`installer/
-    manifest.py`'s `claude_hooks`/`copilot_hooks`); the descriptor itself
-    sits one level up for Claude (`<home>/agentmaster/runtime.json` next to
-    `<home>/agentmaster/hooks/`) and beside the hooks for Copilot
-    (`<home>/agentmaster-hooks/runtime.json`), so both candidate locations
-    relative to this file are checked. Never raises: a missing/malformed
-    descriptor (uninstalled dev checkout, corrupt file) fails open by
-    returning `None`, exactly like every other hook-side failure mode.
-    """
     here = Path(__file__).resolve().parent
     for candidate in (here / 'runtime.json', here.parent / 'runtime.json'):
         with contextlib.suppress(Exception):
@@ -218,17 +158,6 @@ def load_runtime_descriptor() -> RuntimeDescriptor | None:
 
 
 def auto_drain(payload: dict[str, Any], *, limit: int = DEFAULT_INGEST_LIMIT) -> None:
-    """Fire a bounded, fail-open ingest of this workspace's spooled events.
-
-    Invoked at safe checkpoints (session start, subagent stop, post-compaction,
-    Copilot post-agent-tool) right after `spool_event` durably writes an
-    event, so the spool never grows unboundedly between manual `agentmaster
-    ledger ingest-events` calls. Does nothing when no runtime is installed,
-    the ledger is disabled, or the launcher is missing -- a hook must never
-    block or fail the harness on optional observability (SPEC.md §9, §16.1).
-    Ingestion counts are only surfaced to `hook-debug.jsonl` when
-    `AGENTMASTER_HOOK_DEBUG` is set; normal hooks stay silent.
-    """
     with contextlib.suppress(Exception):
         descriptor = load_runtime_descriptor()
         if descriptor is None or not descriptor.ledger_enabled:
@@ -267,12 +196,10 @@ def auto_drain(payload: dict[str, Any], *, limit: int = DEFAULT_INGEST_LIMIT) ->
 
 
 def tool_name(payload: dict[str, Any]) -> str:
-    """Return the lowercased tool name, handling camelCase and snake_case."""
     return str(payload.get('toolName', payload.get('tool_name', ''))).lower()
 
 
 def tool_args(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return the tool arguments, handling the four known payload shapes."""
     return (
         payload.get('toolArgs')
         or payload.get('tool_args')

@@ -1,22 +1,3 @@
-"""Normalize spooled hook events into typed ledger rows (SPEC.md §16.3, §17, §23 M17).
-
-Hooks never write to the ledger directly (they run standalone, without the
-`ledger` package - see `hooklib.spool_event`); this module is the bounded
-ingestion step that drains `ledger.event_spool`'s JSON files into USER_SESSION,
-PROJECT, RUN, AGENT_SESSION, MODEL_CALL, and COMPACTION_EVENT rows.
-
-Ingestion owns USER_SESSION row creation: every dependent row is only ever
-recorded after `upsert_user_session` resolves, so replaying two events for
-the same harness session never creates a second USER_SESSION. Every id
-derived from event identity (agent id, event kind) is deterministic, so
-re-ingesting an already-processed spool file is a no-op rather than a
-duplicate row (`INSERT OR IGNORE` plus MODEL_CALL's existing
-`ux_model_call_agent_session_provider_call` unique index). AGENT_SESSION's
-`entrypoint_id` resolves the event's agent-type name against active
-`kind='agent'` ENTRYPOINT rows (SPEC.md §23 Microtask 19); an unresolved
-name stays NULL rather than guessing.
-"""
-
 import hashlib
 import json
 import sqlite3
@@ -33,8 +14,6 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class IngestReport:
-    """Counts from one `ingest_pending_events` call."""
-
     ingested: int
     malformed: int
     unsupported: int
@@ -48,13 +27,6 @@ def resolve_project(
     id_factory: Callable[[], str],
     now: Callable[[], str],
 ) -> str:
-    """Find or create the PROJECT row for `canonical_root`, else touch `last_seen_at`.
-
-    `fingerprint` is `canonical_root` itself: a hook payload carries no git
-    remote identity to fingerprint on, so this is a deliberate simplification
-    rather than the full root-aliasing identity resolution described in
-    SPEC.md §17.3 (not implemented anywhere yet in this codebase).
-    """
 
     def _op(conn: sqlite3.Connection) -> str:
         row = conn.execute(
@@ -84,13 +56,6 @@ def upsert_user_session(
     id_factory: Callable[[], str],
     now: Callable[[], str],
 ) -> str:
-    """Find or create the USER_SESSION row for `harness_session_id`.
-
-    The SELECT-then-conditionally-INSERT happens inside one
-    `run_write_transaction` operation, under the `BEGIN IMMEDIATE` write
-    lock it takes before calling `operation` - so two ingestion calls for
-    the same harness session can never race into two rows.
-    """
 
     def _op(conn: sqlite3.Connection) -> str:
         row = conn.execute(
@@ -118,12 +83,6 @@ def resolve_run(
     id_factory: Callable[[], str],
     now: Callable[[], str],
 ) -> str:
-    """Reuse this session's open RUN (no `ended_at`), else start a new one.
-
-    Full run lifecycle management (state transitions, closing a run) is
-    Microtask 19's orchestrator control plane; ingestion only needs a
-    stable `run_id` to hang AGENT_SESSION/MODEL_CALL rows on.
-    """
 
     def _op(conn: sqlite3.Connection) -> str:
         row = conn.execute(
@@ -146,13 +105,6 @@ def resolve_run(
 
 
 def _sanitize_session_id(raw: str) -> str:
-    """Make a harness session id safe as a single path segment.
-
-    Mirrors `hooklib._sanitize_session_id`: a session id read from spooled
-    JSON is untrusted input, so it must not be used to build a filesystem
-    path unsanitized -- a crafted `../`-style id must not escape the
-    sessions directory.
-    """
     sid = raw.strip().replace('/', '_').replace('\\', '_')
     if not sid or set(sid) == {'.'}:
         return 'default'
@@ -160,13 +112,6 @@ def _sanitize_session_id(raw: str) -> str:
 
 
 def _read_run_id_marker(spool_dir: Path, harness_session_id: str) -> str | None:
-    """Read the session's `.run_id` marker, or `None` when absent/unreadable.
-
-    `spool_dir` is `<workspace>/.agentmaster/events`; the marker lives at
-    `<workspace>/.agentmaster/sessions/<harness_session_id>/.run_id`
-    (`hooklib.session_dir`'s layout), a sibling of `events/` under the same
-    `.agentmaster` root.
-    """
     marker = (
         spool_dir.parent
         / 'sessions'
@@ -182,10 +127,6 @@ def _read_run_id_marker(spool_dir: Path, harness_session_id: str) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class _RunResolutionContext:
-    """Bundles a `resolve_run` call's arguments so the marker-preferring
-    wrapper below stays under the project's max-arguments lint (PLR0913).
-    """
-
     project_id: str
     user_session_id: str
     id_factory: Callable[[], str]
@@ -198,16 +139,6 @@ def _resolve_run_preferring_marker(
     spool_dir: Path,
     context: _RunResolutionContext,
 ) -> str:
-    """RUN-reconciliation contract: prefer the session's `.run_id` marker.
-
-    When an orchestrator RUN already names itself in the marker, drained
-    AGENT_SESSION/MODEL_CALL rows must attach to that RUN rather than a
-    second, ingestion-created one; `resolve_run`'s session-scoped open-RUN
-    lookup is only used as a fallback, when no marker exists, it names a RUN
-    that isn't there, or that RUN has already ended (never a hard error --
-    markers are best-effort). A stale marker pointing at an already-ENDED
-    RUN must not reattach new rows to a finished run.
-    """
     preferred_run_id = _read_run_id_marker(spool_dir, event.harness_session_id)
     if preferred_run_id is not None:
         row = connection.execute(
@@ -231,12 +162,6 @@ def _agent_session_id(run_id: str, agent_key: str) -> str:
 def resolve_agent_entrypoint_id(
     connection: sqlite3.Connection, agent_name: str
 ) -> str | None:
-    """Resolve `agent_name` to its active `kind='agent'` ENTRYPOINT id, or `None`.
-
-    `None` when `agent_name` has no matching active row (not yet seeded,
-    retired, or never listed by the installer manifest) rather than a
-    synthetic id (SPEC.md §16.3: never fabricate).
-    """
     row = connection.execute(
         "SELECT id FROM ENTRYPOINT WHERE kind = 'agent' AND name = ? AND active = 1",
         (agent_name,),
@@ -245,11 +170,6 @@ def resolve_agent_entrypoint_id(
 
 
 def _nonneg_int(value: str | float | None) -> int | None:
-    """Return `value` as a non-negative int.
-
-    `None` on anything else, never fabricated (SPEC.md §16.3): an absent
-    or unparseable value stays NULL rather than becoming 0 or a guess.
-    """
     if value is None:
         return None
     try:
@@ -328,13 +248,6 @@ def _ingest_agent_session_event(
 
 
 def _snapshot_manifest_digest(snapshot_dir: Path) -> tuple[str, int]:
-    """Hash a deterministic listing of `snapshot_dir`'s files, not their bytes.
-
-    Cheap and reproducible (an `os.stat` walk, no file reads); a full
-    content hash of a whole directory tree is unnecessary for linking a
-    COMPACTION_EVENT to an ARTIFACT and would be far more costly at ingest
-    time than this task's scope justifies.
-    """
     entries = sorted(
         (str(p.relative_to(snapshot_dir)), p.stat().st_size)
         for p in snapshot_dir.rglob('*')
@@ -462,17 +375,6 @@ def ingest_pending_events(
     now: Callable[[], str],
     limit: int | None = None,
 ) -> IngestReport:
-    """Drain up to `limit` spooled events in `spool_dir` into ledger rows.
-
-    Successfully ingested and malformed/unsupported files are discarded
-    (replaying a malformed file cannot succeed later, and an unsupported
-    `kind` will never gain a handler retroactively). A file that raises a
-    `sqlite3.Error` during ingestion is left in place for a future retry.
-    `limit` bounds only the well-formed events actually processed (each one
-    costs a write transaction); malformed files are always discarded since
-    doing so is a cheap unlink, not a ledger write. Events beyond `limit`
-    are left untouched in `spool_dir` for the next checkpoint to drain.
-    """
     result = read_events(spool_dir)
     events = result.events if limit is None else result.events[:limit]
     ingested = 0

@@ -1,10 +1,3 @@
-"""Tests for memory lifecycle/scope/link constraints and FEEDBACK (SPEC.md §17.3, §17.4).
-
-FEEDBACK.user_session_id, per the amended §17, is a FK to USER_SESSION and must
-not accept an AGENT_SESSION id even though both are Agentmaster-generated text
-identifiers.
-"""
-
 import sqlite3
 
 import pytest

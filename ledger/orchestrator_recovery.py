@@ -1,24 +1,3 @@
-"""Interruption recovery for the RUN/TASK state machine (SPEC.md §9, §23 Microtask 19).
-
-Ledger-only recovery: it reconciles what the ledger itself can prove (stale
-task leases left behind by a killed dispatch process) and refuses to guess
-at what it cannot — a RUN in `DeliveryPending` through `MergePending` needs
-git branch/head, PR, CI, or review state to reconcile safely. For those
-states this module records that user direction is required instead of
-silently no-opping or guessing (SPEC.md §9: the orchestrator fails closed).
-`Merged` and `RetrospectivePending` are past that gap: reaching `Merged` in
-the ledger already means the git publisher's merge call succeeded (`agentmaster
-delivery merge-gate` only transitions the RUN after `merge_pull_request`
-returns), and the one transition onward from there (`RetrospectivePending`)
-needs no external check, so recovery advances it directly; `RetrospectivePending`
-itself is resumable in place because `run_retrospective` is idempotent.
-
-Every decision `recover_run` makes is recorded as a RECOVERY_EVENT before it
-returns. Re-running recovery on an already-consistent database — no stale
-lease left, or the same decision already recorded for that state — is a
-no-op: it takes no further action and appends no further event.
-"""
-
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -36,8 +15,6 @@ if TYPE_CHECKING:
     import sqlite3
     from collections.abc import Callable
 
-# RUN states whose only outstanding work is local (leases + the task graph);
-# recovery can reconcile these without any external system.
 _LOCALLY_RECOVERABLE_RUN_STATES = frozenset({
     'Planned',
     'Preflight',
@@ -46,8 +23,6 @@ _LOCALLY_RECOVERABLE_RUN_STATES = frozenset({
     'FixesRequired',
 })
 
-# RUN states that need git/PR/CI/review reconciliation this ledger cannot yet
-# perform (SPEC.md §23 Microtasks 21/22 add the tables that would allow it).
 _EXTERNAL_RECONCILIATION_RUN_STATES = frozenset({
     'DeliveryPending',
     'CIPending',
@@ -70,8 +45,6 @@ RETROSPECTIVE_RESUMABLE_REASON = (
 
 @dataclass(frozen=True, slots=True)
 class RecoveryReport:
-    """The outcome of one `recover_run` call."""
-
     run_id: str
     requires_user_direction: bool
     reason: str | None
@@ -80,8 +53,6 @@ class RecoveryReport:
 
 @dataclass(frozen=True, slots=True)
 class _RecoveryEvent:
-    """One RECOVERY_EVENT row's fields, bundled to keep the writer's signature narrow."""
-
     run_id: str
     task_id: str | None
     decision: str
@@ -172,13 +143,6 @@ def recover_run(
     now: str,
     id_factory: Callable[[], str],
 ) -> RecoveryReport:
-    """Reconcile `run_id` after a killed dispatch process, recording every decision made.
-
-    Raises
-    ------
-    RunNotFoundError
-        No RUN row exists for `run_id`.
-    """
     state = _current_run_state(connection, run_id)
 
     if state in _EXTERNAL_RECONCILIATION_RUN_STATES:

@@ -1,11 +1,3 @@
-"""Ledger init/migrate/backup/doctor commands (SPEC.md §19).
-
-A minimal repository script per SPEC.md §19 ("the exact packaging may be
-python -m agentmaster ... or a repository script"); `agentmaster.cli` (SPEC.md
-§23 Microtask 16) wires these into the unified `agentmaster` command entry
-point and adds the remaining §19 ledger/memory/context commands.
-"""
-
 import argparse
 import json
 import sqlite3
@@ -21,7 +13,6 @@ from ledger.schema import SUPPORTED_SCHEMA_VERSION
 
 
 def cmd_init(ledger_path: Path) -> int:
-    """Create the ledger at `ledger_path` and migrate it to the latest schema version."""
     ledger_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         connection = connect(ledger_path)
@@ -40,7 +31,6 @@ def cmd_init(ledger_path: Path) -> int:
 
 
 def cmd_migrate(ledger_path: Path) -> int:
-    """Apply any pending migrations to an existing ledger."""
     try:
         connection = connect(ledger_path)
     except sqlite3.OperationalError as error:
@@ -57,7 +47,6 @@ def cmd_migrate(ledger_path: Path) -> int:
 
 
 def cmd_backup(ledger_path: Path, destination: Path) -> int:
-    """Write a consistent backup of the ledger to `destination`."""
     connection = connect(ledger_path)
     try:
         backup_to(connection, destination)
@@ -68,8 +57,6 @@ def cmd_backup(ledger_path: Path, destination: Path) -> int:
 
 @dataclass(frozen=True, slots=True)
 class DoctorReport:
-    """The `doctor` command's findings (SPEC.md §19)."""
-
     schema_version: int
     supported_schema_version: int
     journal_mode: str
@@ -80,11 +67,6 @@ class DoctorReport:
 
 
 def cmd_doctor(ledger_path: Path, *, json_output: bool = False) -> int:
-    """Report schema version, journaling decision, and integrity without mutating.
-
-    Returns nonzero if the ledger is missing, its integrity check fails, or
-    its schema version is newer than this package understands.
-    """
     if not ledger_path.exists():
         print(f'{ledger_path}: does not exist', file=sys.stderr)
         return 1

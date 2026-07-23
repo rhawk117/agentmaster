@@ -1,5 +1,3 @@
-"""Tests for `installer.plan_parser` — structured `Uses:` metadata parsing."""
-
 import pytest
 
 from installer.plan_parser import UnknownCapabilityError, parse_tasks, validate_uses

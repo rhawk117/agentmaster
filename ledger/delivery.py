@@ -1,12 +1,3 @@
-"""DELIVERY_ATTEMPT and CI_CHECK recording (SPEC.md §17.1, §20.2, §23 Microtask 22).
-
-The DDL for both tables landed with REVIEW in Microtask 21 (`ledger/
-migrations/0001_initial/upgrade.sql`), which explicitly deferred all
-ingestion/CLI behavior for them to this microtask. This module only records
-rows; `ledger.delivery_gate` reads them back to decide whether CI is green or
-a merge may proceed.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -18,8 +9,6 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class DeliveryAttemptInput:
-    """Everything needed to insert one DELIVERY_ATTEMPT row (SPEC.md §17.1)."""
-
     id: str
     run_id: str
     branch: str
@@ -33,8 +22,6 @@ class DeliveryAttemptInput:
 
 @dataclass(frozen=True, slots=True)
 class CiCheckInput:
-    """Everything needed to insert one CI_CHECK row (SPEC.md §17.1)."""
-
     id: str
     delivery_attempt_id: str
     name: str
@@ -47,7 +34,6 @@ class CiCheckInput:
 
 
 def next_attempt_no(connection: sqlite3.Connection, run_id: str) -> int:
-    """Return the next 1-based `attempt_no` for `run_id`'s delivery attempts."""
     row = connection.execute(
         'SELECT COALESCE(MAX(attempt_no), 0) FROM DELIVERY_ATTEMPT WHERE run_id = ?',
         (run_id,),
@@ -58,7 +44,6 @@ def next_attempt_no(connection: sqlite3.Connection, run_id: str) -> int:
 def record_delivery_attempt(
     connection: sqlite3.Connection, delivery: DeliveryAttemptInput
 ) -> int:
-    """Insert one DELIVERY_ATTEMPT row and return its assigned `attempt_no`."""
     attempt_no = next_attempt_no(connection, delivery.run_id)
 
     def _insert(conn: sqlite3.Connection) -> None:
@@ -88,12 +73,6 @@ def record_delivery_attempt(
 def update_delivery_attempt_head(
     connection: sqlite3.Connection, delivery_attempt_id: str, head_sha: str
 ) -> None:
-    """Update a DELIVERY_ATTEMPT's `head_sha` after a new commit lands on the PR.
-
-    Every CI_CHECK/REVIEW row recorded against the old head becomes stale for
-    `ledger.delivery_gate` once this runs, since it filters strictly on the
-    attempt's current `head_sha`.
-    """
 
     def _update(conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -111,7 +90,6 @@ def update_delivery_attempt_state(
     *,
     completed_at: str | None = None,
 ) -> None:
-    """Update a DELIVERY_ATTEMPT's `state` (and optionally `completed_at`)."""
 
     def _update(conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -125,14 +103,6 @@ def update_delivery_attempt_state(
 
 
 def record_ci_check(connection: sqlite3.Connection, check: CiCheckInput) -> None:
-    """Insert one observed CI_CHECK row.
-
-    Raises
-    ------
-    sqlite3.IntegrityError
-        `check.delivery_attempt_id` does not name an existing DELIVERY_ATTEMPT
-        row (enforced by the ledger connection's `PRAGMA foreign_keys = ON`).
-    """
 
     def _insert(conn: sqlite3.Connection) -> None:
         conn.execute(

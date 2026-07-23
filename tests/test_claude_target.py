@@ -1,5 +1,3 @@
-"""Tests for the Claude Code install target of the Python installer."""
-
 import json
 import sys
 from pathlib import Path
@@ -309,7 +307,7 @@ def test_fake_manifest_installs_exactly_its_files(tmp_path: Path, make_manifest)
 
     assert (home / 'skills' / 'myskill' / 'SKILL.md').is_file()
     installed_scout = (home / 'agents' / 'scout.md').read_text(encoding='utf-8')
-    assert 'body' in installed_scout  # rendered from the fake root's shared body
+    assert 'body' in installed_scout
     assert (home / 'agentmaster' / 'hooks' / 'myhook.py').is_file()
     assert not (home / 'agents' / 'explore.md').exists()
 
@@ -392,7 +390,6 @@ def test_managed_files_participate_in_dry_run_reporting(
 
 
 def test_uninstall_preserves_user_edited_hook_entry(tmp_path: Path, repo_root) -> None:
-    """The Task 6 fix: editing a managed hook entry protects it from uninstall."""
     home = tmp_path / 'claude-home'
     agentmaster_home = tmp_path / 'agentmaster-home'
 

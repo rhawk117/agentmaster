@@ -1,5 +1,3 @@
-"""Tests for the release archive's tested source of truth (SPEC.md microtask 24)."""
-
 import os
 import subprocess
 import sys
@@ -14,8 +12,6 @@ from scripts.release_bundle import (
     write_checksums,
 )
 
-# Same substrings tests/conftest.py's _scrubbed_base_env uses, duplicated here
-# so this module has no import-time dependency on conftest internals.
 _ENV_SCRUB_SUBSTRINGS = (
     'CLAUDE',
     'COPILOT',
@@ -52,10 +48,6 @@ def test_runtime_paths_exist_and_are_tracked():
 
 
 def test_runtime_paths_include_the_runtime_modules():
-    # Regression guard: an earlier release.yml archived the installer and
-    # skills but omitted the `agentmaster` CLI package and the `ledger`
-    # module it depends on, so the extracted bundle couldn't run
-    # `python -m agentmaster ledger doctor`.
     assert 'agentmaster' in RUNTIME_PATHS
     assert 'ledger' in RUNTIME_PATHS
 

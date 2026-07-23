@@ -1,5 +1,3 @@
-"""Tests for the deterministic review gate (SPEC.md §20.3, §23 Microtask 21)."""
-
 import uuid
 
 import pytest
@@ -42,11 +40,6 @@ def _to_reviewing(connection, run_id: str) -> None:
 
 
 def _retry_to_reviewing(connection, run_id: str) -> None:
-    """Drive a run from FixesRequired (or earlier) back to Reviewing.
-
-    Used for a second review round after NEEDS_FIXES sent the run back to
-    FixesRequired -- 'Preflight' is skipped since the run already passed it.
-    """
     for state in ('Executing', 'Verifying', 'DeliveryPending', 'CIPending'):
         transition_run(connection, run_id, state, _run_input())
     transition_run(connection, run_id, 'ReviewRequired', _run_input())
@@ -222,10 +215,6 @@ def test_retry_ceiling_fails_the_run_and_surfaces_blockers(
 def test_retry_ceiling_trips_on_exactly_the_max_th_attempt(
     ledger_connection, store, gated_run
 ):
-    """The boundary is exact: MAX_REVIEW_ATTEMPTS - 1 attempts are processed as
-    ordinary NEEDS_FIXES verdicts, and the MAX_REVIEW_ATTEMPTS-th trips the
-    ceiling -- this fails if the boundary moves by one in either direction.
-    """
     run_id, delivery_attempt_id, reviewer_session_id = gated_run
     finding = ReviewFindingInput(severity='blocker', summary='still broken')
 

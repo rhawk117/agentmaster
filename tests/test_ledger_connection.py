@@ -1,5 +1,3 @@
-"""Tests for the standard-library SQLite connection factory (SPEC.md §16.1)."""
-
 import sqlite3
 
 import pytest

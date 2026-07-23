@@ -1,5 +1,3 @@
-"""Tests for the SQLite online backup API wrapper (SPEC.md §16.1)."""
-
 import sqlite3
 import stat
 

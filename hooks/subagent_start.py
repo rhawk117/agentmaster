@@ -1,5 +1,3 @@
-"""SubagentStart -> record a start timestamp keyed by agent_id for duration math."""
-
 import time
 
 import hooklib

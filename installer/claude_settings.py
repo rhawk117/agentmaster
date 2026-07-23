@@ -1,12 +1,3 @@
-"""Parse, validate, and plan Claude `settings.json` mutations (SPEC.md §13/§14).
-
-Deep, fail-closed shape validation for the mutable JSON surfaces Agentmaster
-touches: the root object, `hooks`, each event's entry array, each hook
-entry, and `env`. `merge_hook_events`/`strip_hook_events` are pure functions
-over already-parsed documents — `installer.claude` owns the file I/O and
-folds the result into the same transactional batch as agents and hooks.
-"""
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,30 +7,12 @@ AUTO_COMPACT_ENV_KEY = 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'
 
 
 class ClaudeSettingsError(ValueError):
-    """`settings.json` (or a value derived from it) has an invalid shape.
-
-    Parameters
-    ----------
-    key_path
-        Dotted/indexed JSON location (e.g. ``hooks.PreToolUse[0].command``).
-    message
-        Human-readable reason.
-    """
-
     def __init__(self, key_path: str, message: str) -> None:
         self.key_path = key_path
         super().__init__(f'{key_path}: {message}')
 
 
 def validate_settings(document: object) -> dict:
-    """Fail-closed shape validation; returns `document` unchanged when valid.
-
-    Raises
-    ------
-    ClaudeSettingsError
-        `document` isn't a JSON object, `hooks`/`env` aren't objects, an
-        event's entries aren't an array, or a hook entry is malformed.
-    """
     if not isinstance(document, dict):
         raise ClaudeSettingsError('$', 'settings.json must contain a JSON object')
     hooks = document.get('hooks', {})
@@ -79,13 +52,6 @@ def _validate_command_hook(key_path: str, command: object) -> None:
 
 
 def is_ours(entry: dict, marker: str) -> bool:
-    """True when every command hook in `entry` references our install-path marker.
-
-    A content-based fallback for entries installed before owned-state
-    tracking existed; `merge_hook_events` uses it alongside the precise
-    `owned` record so an upgrade from an older install still converges to
-    exactly the current managed set.
-    """
     commands = entry.get('hooks', [])
     return bool(commands) and all(
         isinstance(hook, dict) and marker in hook.get('command', '') for hook in commands
@@ -93,7 +59,6 @@ def is_ours(entry: dict, marker: str) -> bool:
 
 
 def _hooks_dict(settings: Mapping[str, object]) -> dict[str, list]:
-    """Return `settings['hooks']`'s event arrays; callers assume pre-validated shape."""
     hooks = settings.get('hooks')
     if not isinstance(hooks, dict):
         return {}
@@ -111,13 +76,6 @@ def merge_hook_events(
     owned: Mapping[str, list],
     marker: str,
 ) -> tuple[dict, dict[str, list]]:
-    """Return `(new_settings, new_owned)` with this run's managed entries in place.
-
-    Any entry recorded in `owned[event]` from a prior install, or matching
-    the legacy content `marker`, is removed first; every other entry in the
-    array — the user's own — is left untouched. `new_owned` records exactly
-    what this call installed, for a later `strip_hook_events` to use.
-    """
     hooks = _hooks_dict(settings)
     new_owned: dict[str, list] = {}
     for event, entries in events.items():
@@ -136,12 +94,6 @@ def merge_hook_events(
 
 
 def strip_hook_events(settings: Mapping[str, object], owned: Mapping[str, list]) -> dict:
-    """Remove only entries that still exactly equal what we last installed.
-
-    An entry the user has since edited no longer matches and survives —
-    this is the precise counterpart to `merge_hook_events`'s permissive
-    pre-clear, and the fix for "later user edits survive uninstall".
-    """
     hooks = _hooks_dict(settings)
     for event, owned_entries in owned.items():
         if event in hooks:
@@ -152,7 +104,6 @@ def strip_hook_events(settings: Mapping[str, object], owned: Mapping[str, list])
 
 
 def _env_dict(settings: Mapping[str, object]) -> dict[str, str]:
-    """Return `settings['env']`; callers assume pre-validated shape."""
     env = settings.get('env')
     if not isinstance(env, dict):
         return {}
@@ -166,15 +117,6 @@ def _env_dict(settings: Mapping[str, object]) -> dict[str, str]:
 def merge_auto_compact_override(
     settings: Mapping[str, object], *, owned: Mapping[str, object] | None, percent: int
 ) -> tuple[dict, dict[str, object]]:
-    """Return `(new_settings, new_owned)` setting the auto-compact env override.
-
-    The first time Agentmaster takes ownership of `AUTO_COMPACT_ENV_KEY`
-    (`owned` is `None`), the current environment value is captured as
-    `new_owned['original']` so a later `strip_auto_compact_override` can
-    restore exactly the pre-Agentmaster value (SPEC.md §15). A later call
-    with `owned` already set reuses its recorded `original` rather than
-    re-capturing Agentmaster's own prior value.
-    """
     env = _env_dict(settings)
     original = owned['original'] if owned is not None else env.get(AUTO_COMPACT_ENV_KEY)
     env[AUTO_COMPACT_ENV_KEY] = str(percent)
@@ -186,11 +128,6 @@ def merge_auto_compact_override(
 def strip_auto_compact_override(
     settings: Mapping[str, object], owned: Mapping[str, object] | None
 ) -> dict:
-    """Restore the pre-Agentmaster env value only if it still matches what we set.
-
-    Mirrors `strip_hook_events`: a user edit since install (the current env
-    value no longer equals `owned['value']`) survives and is left alone.
-    """
     if owned is None:
         return dict(settings)
     env = _env_dict(settings)

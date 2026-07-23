@@ -1,14 +1,3 @@
-"""Installed-runtime independence + the runtime descriptor contract.
-
-Red against v2.0.0 for a structural reason (evidence 12/13 in the ledger
-runtime plan), never a crash: the installer bakes a `Path(sys.executable)`
-interpreter into hook command strings and never emits a `runtime.json`
-descriptor or a `<agentmaster-home>/bin/` launcher, so hooks have no
-checkout-independent way to find their config/ledger. These tests assert the
-authoritative descriptor contract verbatim (scenario 1, 7) and that success is
-judged by row visibility, never file size (scenario 8).
-"""
-
 import json
 import sqlite3
 import subprocess
@@ -17,8 +6,6 @@ import pytest
 
 pytestmark = [pytest.mark.subprocess, pytest.mark.integration]
 
-# Fields the "Runtime descriptor contract" section of the plan requires,
-# verbatim -- T2 must implement exactly this shape.
 _DESCRIPTOR_FIELDS = {
     'config_path',
     'launcher',
@@ -54,10 +41,6 @@ def _install(run_cli, repo_root, tmp_path, *, extra_args=(), no_ledger=False):
 def test_installed_runtime_emits_descriptor_beside_claude_hooks(
     run_cli, repo_root, tmp_path
 ):
-    """Scenario 1 + 7: the installer must emit `runtime.json` next to the
-    installed Claude hooks (`<CLAUDE_CONFIG_DIR>/agentmaster/runtime.json`),
-    shaped exactly per the Runtime descriptor contract.
-    """
     result, claude_home, agentmaster_home = _install(run_cli, repo_root, tmp_path)
     assert result.returncode == 0, result.stderr
 
@@ -83,10 +66,6 @@ def test_installed_runtime_emits_descriptor_beside_claude_hooks(
 
 
 def test_no_ledger_produces_a_disabled_descriptor_and_no_db(run_cli, repo_root, tmp_path):
-    """Scenario 7: `--no-ledger` must set `ledger_enabled=false`,
-    `ledger_path=null`, and create no database file -- the disabled-ledger
-    invariant.
-    """
     result, claude_home, agentmaster_home = _install(
         run_cli, repo_root, tmp_path, no_ledger=True
     )
@@ -105,11 +84,6 @@ def test_no_ledger_produces_a_disabled_descriptor_and_no_db(run_cli, repo_root, 
 def test_installed_launcher_runs_standalone_from_a_separate_repo(
     run_cli, repo_root, tmp_path
 ):
-    """Scenario 1: after install, a launcher under `<agentmaster-home>/bin/`
-    must be able to initialize/query/ingest against the ledger from a target
-    repo that is not the source checkout, with the checkout absent from cwd
-    and PYTHONPATH.
-    """
     result, _claude_home, agentmaster_home = _install(run_cli, repo_root, tmp_path)
     assert result.returncode == 0, result.stderr
 
@@ -147,10 +121,6 @@ def test_installed_launcher_runs_standalone_from_a_separate_repo(
 def test_success_is_judged_by_committed_rows_never_file_size(
     run_cli, repo_root, tmp_path, installed_hook
 ):
-    """Scenario 8: assert row visibility after ingestion, explicitly not
-    ledger.sqlite3 file-size/`du` growth. Triggers one installed-hook event
-    (SubagentStop) so there is something to auto-drain and commit.
-    """
     result, claude_home, agentmaster_home = _install(run_cli, repo_root, tmp_path)
     assert result.returncode == 0, result.stderr
 

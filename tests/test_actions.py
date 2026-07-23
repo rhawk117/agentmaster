@@ -1,5 +1,3 @@
-"""Tests for the transactional installer actions core."""
-
 from typing import TYPE_CHECKING
 
 import pytest
@@ -147,8 +145,6 @@ def test_summary_counts_by_status(tmp_path: Path) -> None:
 def test_backup_dir_collides_retries_with_next_suffix(tmp_path: Path) -> None:
     home = tmp_path / 'home'
     apply_plans([_plan(tmp_path, 'a.md', 'v1\n')], backup_root=home, dry_run=False)
-    # Simulate a pre-existing backup dir from a concurrent/prior run that
-    # happens to pick the same first candidate name.
     (home / 'agentmaster-backup-collides').mkdir(parents=True)
     suffixes = iter(['collides', 'unique'])
 
@@ -213,9 +209,9 @@ def test_mid_batch_failure_rolls_back_prior_writes(tmp_path: Path) -> None:
         actions_module._write_atomic(plan, prior_mode)
 
     plans = [
-        _plan(tmp_path, 'a.md', 'changed\n'),  # update — must be restored
-        _plan(tmp_path, 'b.md', 'new\n'),  # create — must be deleted
-        _plan(tmp_path, 'c.md', 'fails\n'),  # fails before ever being written
+        _plan(tmp_path, 'a.md', 'changed\n'),
+        _plan(tmp_path, 'b.md', 'new\n'),
+        _plan(tmp_path, 'c.md', 'fails\n'),
     ]
 
     with pytest.raises(OSError, match='disk full'):
@@ -236,7 +232,7 @@ def test_rollback_reports_unrestored_paths_separately(
 
     def backup_then_lose_it(destination, backup_dir, backup_root):
         target = original_backup(destination, backup_dir, backup_root)
-        target.unlink()  # simulate the backup becoming unavailable before rollback
+        target.unlink()
         return target
 
     monkeypatch.setattr(actions_module, '_backup', backup_then_lose_it)

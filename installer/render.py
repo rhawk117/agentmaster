@@ -1,12 +1,3 @@
-"""Render worker agent files from the canonical shared bodies + manifest.
-
-The canonical body of each worker lives in `shared/agents/<name>.md` (no
-frontmatter, no marker). Platform-specific frontmatter and the `%USES_RULE%`
-substitution come from an injected :class:`Manifest`, so the same body renders
-both the Claude (`agents/<name>.md`) and Copilot (`copilot/agents/<name>.agent.md`)
-variants.
-"""
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -43,13 +34,6 @@ def render_worker(
     root: Path | None = None,
     overrides: Mapping[str, str] | None = None,
 ) -> str:
-    """Return the full generated file content for one worker on one platform.
-
-    Bodies come from `root/shared/agents/`; `root` defaults to the repository
-    that contains this module. `overrides` applies role-specific allow-listed
-    frontmatter scalars (see `installer.frontmatter`) to this render only —
-    the frozen `manifest` is never mutated.
-    """
     frontmatter = (
         manifest.claude_frontmatter
         if platform == 'claude'
@@ -63,14 +47,12 @@ def render_worker(
 
 
 def generated_path(name: str, platform: Platform, root: Path) -> Path:
-    """Return the committed output path for a worker under `root`."""
     if platform == 'claude':
         return root / 'agents' / f'{name}.md'
     return root / 'copilot' / 'agents' / f'{name}.agent.md'
 
 
 def sync_workers(root: Path, manifest: Manifest = MANIFEST) -> list[Path]:
-    """Regenerate every worker file under `root`; return the written paths."""
     written: list[Path] = []
     for name in manifest.workers:
         for platform in ('claude', 'copilot'):

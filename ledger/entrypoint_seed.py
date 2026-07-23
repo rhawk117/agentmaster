@@ -1,12 +1,3 @@
-"""Idempotent ENTRYPOINT registry seeding (SPEC.md §17.1, §19, §23 Microtask 19).
-
-`skill`/`agent`/`hook` rows come from `installer.manifest.MANIFEST`; `command`
-rows come from `agentmaster.registry.COMMAND_REGISTRY` (the manifest carries
-no command list). Seeding never deletes a row: a `(kind, name)` no longer
-named by either source is deactivated (`active=0`) rather than removed, so
-provenance for past sessions/tool calls that reference it survives.
-"""
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -23,8 +14,6 @@ __all__ = ['EntrypointSeedReport', 'seed_entrypoints']
 
 @dataclass(frozen=True, slots=True)
 class _DesiredEntrypoint:
-    """One entrypoint this call wants present and active."""
-
     kind: str
     name: str
     source_path: str
@@ -53,8 +42,6 @@ def _desired_entrypoints(
 
 @dataclass(frozen=True, slots=True)
 class EntrypointSeedReport:
-    """Counts of rows one `seed_entrypoints` call inserted/updated/deactivated."""
-
     inserted: int
     updated: int
     deactivated: int
@@ -68,14 +55,6 @@ def seed_entrypoints(
     manifest: Manifest = MANIFEST,
     command_registry: tuple[CommandEntry, ...] = COMMAND_REGISTRY,
 ) -> EntrypointSeedReport:
-    """Idempotently seed ENTRYPOINT rows from `manifest` and `command_registry`.
-
-    A `(kind, name)` not yet present is inserted active; an existing row
-    whose `source_path` drifted or that was previously deactivated is
-    updated in place and reactivated; an active row no longer named by
-    either source is deactivated. Calling this twice with unchanged inputs
-    makes no writes.
-    """
     desired = _desired_entrypoints(manifest, command_registry)
     desired_keys = {(row.kind, row.name) for row in desired}
 

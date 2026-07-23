@@ -1,5 +1,3 @@
-"""Shared fixtures for the agentmaster test suite."""
-
 import json
 import os
 import shutil
@@ -21,13 +19,8 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# A fixed timestamp for ledger rows seeded by `seed_project_run_task`/`seed_memory`;
-# tests that assert on `created_at`/`updated_at` compare against this constant.
 LEDGER_SEED_CREATED_AT = '2026-07-20T00:00:00Z'
 
-# Substrings identifying environment variables that must not leak from the
-# developer/CI host into subprocess-driven tests (Claude, Copilot, Agentmaster
-# home, ledger, compaction, debug, GitHub, and token variables).
 _ENV_SCRUB_SUBSTRINGS = (
     'CLAUDE',
     'COPILOT',
@@ -56,7 +49,6 @@ def repo_root() -> Path:
 
 @pytest.fixture
 def repo_copy(tmp_path: Path) -> Path:
-    """A disposable copy of the repository tree, sans VCS and caches."""
     dest = tmp_path / 'repo'
     shutil.copytree(
         REPO_ROOT,
@@ -78,7 +70,6 @@ def statuses() -> Callable[[list[tuple[str, Path]]], list[str]]:
 
 @pytest.fixture
 def make_manifest() -> Callable[..., Manifest]:
-    """Factory for fake Manifests; every field defaults to empty."""
 
     def _make(**overrides: object) -> Manifest:
         fields: dict = {
@@ -147,14 +138,6 @@ def run_hook(tmp_path: Path) -> Callable[..., subprocess.CompletedProcess[str]]:
 
 @pytest.fixture
 def installed_hook() -> Callable[..., subprocess.CompletedProcess[str]]:
-    """Invoke an INSTALLED hook file (not the source checkout's `hooks/`).
-
-    Complements `run_hook`: tests asserting the runtime-descriptor-driven
-    auto-drain (which resolves `runtime.json` relative to the hook's own
-    installed location) must run the hook copy the installer actually wrote
-    -- e.g. `<claude_home>/agentmaster/hooks/telemetry.py` -- with `cwd` set
-    to the target workspace the payload's `cwd` field also names.
-    """
 
     def _run(
         hook_path: Path,
@@ -180,8 +163,6 @@ def installed_hook() -> Callable[..., subprocess.CompletedProcess[str]]:
 
 @dataclass(frozen=True, slots=True)
 class SeededRun:
-    """Canonical ids for one seeded PROJECT + USER_SESSION + RUN (+ optional TASK)."""
-
     project_id: str = 'project-1'
     user_session_id: str = 'user-session-1'
     run_id: str = 'run-1'
@@ -192,9 +173,6 @@ class SeededRun:
 def seed_project_run_task(
     connection: sqlite3.Connection, seed: SeededRun | None = None
 ) -> SeededRun:
-    """Insert one PROJECT/USER_SESSION/RUN row, and a TASK row unless `seed.task_id`
-    is `None`.
-    """
     if seed is None:
         seed = SeededRun()
     connection.execute(
@@ -231,8 +209,6 @@ def seed_project_run_task(
 
 @dataclass(frozen=True, slots=True)
 class SeededMemory:
-    """Canonical fields for one seeded, project-scoped MEMORY row."""
-
     memory_id: str
     project_id: str = 'project-1'
     state: str = 'Active'
@@ -241,7 +217,6 @@ class SeededMemory:
 
 
 def seed_memory(connection: sqlite3.Connection, seed: SeededMemory) -> SeededMemory:
-    """Insert one MEMORY row and its project-scoped MEMORY_SCOPE row."""
     connection.execute(
         'INSERT INTO MEMORY '
         '(id, origin_project_id, state, memory_kind, title, content, created_at, '
@@ -268,13 +243,6 @@ def seed_memory(connection: sqlite3.Connection, seed: SeededMemory) -> SeededMem
 
 @pytest.fixture
 def ledger_connection(tmp_path: Path) -> Iterator[sqlite3.Connection]:
-    """A freshly migrated, unseeded ledger connection at the current schema version.
-
-    The single stable, side-effect-free replacement for the ad hoc
-    `connect(tmp_path / 'ledger.sqlite3')` + `migrate(...)` pairs previously
-    copy-pasted (with subtly different seeding baked in) across the ledger
-    test modules.
-    """
     connection = connect_ledger(tmp_path / 'ledger.sqlite3')
     migrate_ledger(connection)
     yield connection

@@ -1,10 +1,4 @@
-"""Frozen manifest of worker frontmatter and per-platform substitutions.
-
-Every consumer takes a :class:`Manifest` by injection so tests can pass fakes.
-Frontmatter blocks are copied byte-for-byte from the committed agent files.
-"""
-
-# ruff: noqa: E501 -- frontmatter descriptions are verbatim copy and exceed the line limit
+# ruff: noqa: E501
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -15,8 +9,6 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class Manifest:
-    """Static description of the worker agents and their platform variants."""
-
     workers: tuple[str, ...]
     claude_skills: tuple[str, ...]
     copilot_coordinators: tuple[str, ...]

@@ -1,5 +1,3 @@
-"""Tests for procedure-version proposal/activation/demotion (SPEC.md §20.4, §23 M23)."""
-
 from typing import TYPE_CHECKING
 
 import pytest

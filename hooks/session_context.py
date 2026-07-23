@@ -1,5 +1,3 @@
-"""SessionStart -> announce the session workspace and re-hydration pointer."""
-
 import hooklib
 
 

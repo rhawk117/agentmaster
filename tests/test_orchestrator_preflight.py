@@ -1,5 +1,3 @@
-"""Tests for orchestrator preflight (SPEC.md §9, §23 M19)."""
-
 import uuid
 
 import pytest

@@ -1,5 +1,3 @@
-"""Tests for the `agentmaster` CLI's registered-command table (SPEC.md §17.1, §19)."""
-
 from agentmaster.registry import COMMAND_REGISTRY, find_command
 
 

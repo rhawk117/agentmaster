@@ -1,5 +1,3 @@
-"""PreToolUse (Agent) -> block dispatch when CLAUDE_CODE_SUBAGENT_MODEL is set."""
-
 import os
 import sys
 

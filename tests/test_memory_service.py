@@ -1,5 +1,3 @@
-"""Tests for the memory search/show/lifecycle service (SPEC.md §17.3-§17.5, §23 MT16)."""
-
 import itertools
 
 import pytest

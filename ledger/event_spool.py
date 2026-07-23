@@ -1,13 +1,3 @@
-"""Read the on-disk spool of hook events pending ledger ingestion (SPEC.md §16.1, §19).
-
-Hook processes never import the `ledger` package: they run standalone,
-copied without it, alongside only `hooklib.py` (see `installer/manifest.py`).
-`hooklib.spool_event` writes a small versioned JSON file per event instead;
-this module reads and validates that same wire format so `ledger.ingestion`
-can normalize it into typed rows. Malformed files are reported, never
-raised, matching the fail-open posture the hook side already holds.
-"""
-
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -20,8 +10,6 @@ SCHEMA_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class SpooledEvent:
-    """One parsed, validated event read from the spool directory."""
-
     path: Path
     kind: str
     harness_session_id: str
@@ -30,8 +18,6 @@ class SpooledEvent:
 
 @dataclass(frozen=True, slots=True)
 class SpoolReadResult:
-    """Every event parsed from one `read_events` call, and which files failed to parse."""
-
     events: tuple[SpooledEvent, ...]
     malformed: tuple[Path, ...]
 
@@ -60,7 +46,6 @@ def _parse(path: Path) -> SpooledEvent | None:
 
 
 def read_events(spool_dir: Path) -> SpoolReadResult:
-    """Parse every `*.json` spool file, oldest first; report malformed ones separately."""
     if not spool_dir.is_dir():
         return SpoolReadResult((), ())
     events: list[SpooledEvent] = []
@@ -75,6 +60,5 @@ def read_events(spool_dir: Path) -> SpoolReadResult:
 
 
 def discard(paths: tuple[Path, ...] | list[Path]) -> None:
-    """Remove spool files that have been durably ingested (or can never be)."""
     for path in paths:
         path.unlink(missing_ok=True)

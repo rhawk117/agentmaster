@@ -1,18 +1,3 @@
-"""Forward-only, transactional, versioned SQLite migrations (SPEC.md §16.3).
-
-Each migration runs in its own transaction and bumps `PRAGMA user_version`
-on success; a failure rolls back only that migration, leaving earlier ones
-applied. A database reporting a schema version newer than
-`SUPPORTED_SCHEMA_VERSION` is refused rather than risk misreading it.
-
-`MIGRATIONS` is discovered from `ledger/migrations/<name>/upgrade.sql`
-directories (`ledger/schema.py`), applied in lexicographic directory-name
-order, and stamps `user_version` with each migration's numeric ordinal.
-Pre-release policy: until v2.0.0 ships, schema changes edit
-`ledger/migrations/0001_initial/upgrade.sql` in place; the chain only grows
-once v2.0.0 has released.
-"""
-
 import sqlite3
 from typing import TYPE_CHECKING
 
@@ -32,18 +17,10 @@ __all__ = [
 ]
 
 
-class MigrationError(RuntimeError):
-    """The database's schema version is unsupported, or a migration failed."""
+class MigrationError(RuntimeError): ...
 
 
 def current_version(connection: sqlite3.Connection) -> int:
-    """Return the schema version recorded in `PRAGMA user_version`.
-
-    Raises
-    ------
-    MigrationError
-        The database file is unreadable or not a valid SQLite database.
-    """
     try:
         row = connection.execute('PRAGMA user_version').fetchone()
     except sqlite3.DatabaseError as error:
@@ -52,19 +29,6 @@ def current_version(connection: sqlite3.Connection) -> int:
 
 
 def migrate(connection: sqlite3.Connection, *, backup_path: Path | None = None) -> int:
-    """Apply pending migrations in order and return the resulting version.
-
-    When `backup_path` is given and the database already has data (version
-    greater than zero), a consistent backup is written before the first
-    pending migration runs (SPEC.md §16: "Back up before migrations that
-    transform existing data").
-
-    Raises
-    ------
-    MigrationError
-        The database reports a schema version newer than
-        `SUPPORTED_SCHEMA_VERSION`, or a migration raised a SQLite error.
-    """
     version = current_version(connection)
     if version > SUPPORTED_SCHEMA_VERSION:
         raise MigrationError(
